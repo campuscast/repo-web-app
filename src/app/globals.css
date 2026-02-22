@@ -1,0 +1,27 @@
+@config "../../tailwind.config.ts";
+@import "tailwindcss";
+
+:root {
+  --background: 200 33% 98%;
+  --foreground: 215 28% 17%;
+  --card: 0 0% 100%;
+  --card-foreground: 215 28% 17%;
+  --border: 216 18% 88%;
+  --input: 216 18% 88%;
+  --primary: 214 76% 36%;
+  --primary-foreground: 0 0% 100%;
+  --muted: 214 30% 95%;
+  --muted-foreground: 215 16% 40%;
+  --destructive: 0 72% 44%;
+  --destructive-foreground: 0 0% 100%;
+  --success: 149 62% 32%;
+  --success-foreground: 0 0% 100%;
+  --radius: 0.65rem;
+}
+
+body {
+  background-color: hsl(var(--background));
+  color: hsl(var(--foreground));
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}

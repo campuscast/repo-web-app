@@ -1,0 +1,3 @@
+export const ACCESS_TOKEN_REFRESH_SKEW_SECONDS = 30;
+export const DEFAULT_LOCK_TTL_SECONDS = 300;
+export const API_TIMEOUT_MS = 15000;
