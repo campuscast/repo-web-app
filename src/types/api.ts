@@ -15,7 +15,7 @@ export const tokenPairSchema = z.object({
 export const userMeSchema = z.object({
   user: z.object({
     id: z.string(),
-    email: z.string().email(),
+    email: z.string().min(1),
     name: z.string().optional()
   }),
   roles: z.array(z.string()).default([]),
@@ -97,9 +97,11 @@ export const contentAssetSchema = z.object({
   zone_id: z.string(),
   filename: z.string(),
   content_type: z.string(),
-  file_size: z.number().int().nonnegative(),
+  // TypeORM returns bigint columns as strings — coerce to number
+  file_size: z.coerce.number().int().nonnegative(),
   sha256_hash: z.string(),
   status: z.enum(['uploading', 'ready', 'deleted']),
+  storage_key: z.string().default(''),
   signature: z.string().default(''),
   key_id: z.string().default('')
 });

@@ -9,6 +9,8 @@ export type ServerSession = {
   accessToken?: string;
 };
 
+const ACCESS_TOKEN_COOKIE = 'cc_access_token';
+
 async function fetchMe(cookieHeader: string, accessToken?: string) {
   const res = await fetch(`${env.backendBaseUrl}/api/v1/me`, {
     method: 'GET',
@@ -75,9 +77,17 @@ export async function getServerSession(): Promise<ServerSession | null> {
     .map((cookie) => `${cookie.name}=${encodeURIComponent(cookie.value)}`)
     .join('; ');
 
-  const me = await fetchMe(cookieHeader);
+  const accessTokenFromCookie = cookieStore.get(ACCESS_TOKEN_COOKIE)?.value;
+  const me = await fetchMe(cookieHeader, accessTokenFromCookie);
   if (me) {
-    return { me };
+    return { me, accessToken: accessTokenFromCookie };
+  }
+
+  if (accessTokenFromCookie) {
+    const fallbackFromCookie = fallbackMeFromAccessToken(accessTokenFromCookie);
+    if (fallbackFromCookie) {
+      return { me: fallbackFromCookie, accessToken: accessTokenFromCookie };
+    }
   }
 
   const refreshed = await refreshAccessToken(cookieHeader);

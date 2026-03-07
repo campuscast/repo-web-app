@@ -17,6 +17,8 @@ type RequestOptions<T> = {
   signal?: AbortSignal;
 };
 
+const DEFAULT_REQUEST_TIMEOUT_MS = 8_000;
+
 export class ApiError extends Error {
   readonly status: number;
   readonly payload?: unknown;
@@ -51,17 +53,37 @@ async function request<T>(options: RequestOptions<T>): Promise<T> {
   const token = auth ? getAccessToken() : null;
   const csrfToken = method !== 'GET' ? getCsrfTokenFromCookie() : null;
 
-  const response = await fetch(`${env.apiPrefix}${path}`, {
-    method,
-    headers: {
-      'Content-Type': 'application/json',
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-      ...(csrfToken ? { 'X-CSRF-Token': csrfToken } : {})
-    },
-    credentials: 'include',
-    body: body ? JSON.stringify(body) : undefined,
-    signal
-  });
+  const timeoutController = new AbortController();
+  const timeoutId = setTimeout(() => timeoutController.abort(), DEFAULT_REQUEST_TIMEOUT_MS);
+  const onExternalAbort = () => timeoutController.abort();
+  signal?.addEventListener('abort', onExternalAbort);
+
+  let response: Response;
+  try {
+    response = await fetch(`${env.apiPrefix}${path}`, {
+      method,
+      headers: {
+        'Content-Type': 'application/json',
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        ...(csrfToken ? { 'X-CSRF-Token': csrfToken } : {})
+      },
+      credentials: 'include',
+      body: body ? JSON.stringify(body) : undefined,
+      signal: timeoutController.signal
+    });
+  } catch (error) {
+    if (timeoutController.signal.aborted) {
+      if (signal?.aborted) {
+        throw new ApiError(499, 'Request was cancelled');
+      }
+      throw new ApiError(408, `Request timeout after ${DEFAULT_REQUEST_TIMEOUT_MS}ms`);
+    }
+
+    throw error;
+  } finally {
+    clearTimeout(timeoutId);
+    signal?.removeEventListener('abort', onExternalAbort);
+  }
 
   if (response.status === 401 && auth && !skipRefresh) {
     const refreshed = await refreshAccessToken();

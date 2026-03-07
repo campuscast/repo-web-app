@@ -1,5 +1,5 @@
-import { DevicesAdmin } from '@/features/devices/devices-admin';
+import { redirect } from 'next/navigation';
 
 export default function DevicesPage() {
-  return <DevicesAdmin />;
+  redirect('/devices');
 }

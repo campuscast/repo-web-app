@@ -1,7 +1,7 @@
 import { ScheduleEditor } from '@/features/schedules/schedule-editor';
 
 export default async function SchedulePage({
-  params
+  params,
 }: {
   params: Promise<{ scheduleId: string }>;
 }) {

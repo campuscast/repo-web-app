@@ -1,19 +1,71 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useForm } from 'react-hook-form';
+import { zodResolver } from '@hookform/resolvers/zod';
+import { z } from 'zod';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { MoreHorizontal, Plus, Search } from 'lucide-react';
 import { toast } from 'sonner';
 import { useAuthStore } from '@/auth/store';
 import { hasRole } from '@/auth/guards';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { DataTable } from '@/components/common/data-table';
+import { EmptyState } from '@/components/common/empty-state';
+import { PageHeader } from '@/components/common/page-header';
+import { StatusBadge } from '@/components/common/status-badge';
+import { Button } from '@/components/ui/button';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger
+} from '@/components/ui/dialog';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger
+} from '@/components/ui/dropdown-menu';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Button } from '@/components/ui/button';
-import { Badge } from '@/components/ui/badge';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue
+} from '@/components/ui/select';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
-import { Select } from '@/components/ui/select';
 import { queryKeys } from '@/lib/query-keys';
 import { zoneService } from '@/services/zone-service';
+
+const createZoneSchema = z.object({
+  name: z.string().min(2, 'Введите название зоны'),
+  description: z.string().max(140, 'Максимум 140 символов')
+});
+
+type CreateZoneForm = z.infer<typeof createZoneSchema>;
+
+const policySchema = z.object({
+  max_schedule_slots: z
+    .string()
+    .min(1, 'Введите значение')
+    .refine((value) => Number.isInteger(Number(value)) && Number(value) >= 1 && Number(value) <= 10_000, {
+      message: 'Значение от 1 до 10000'
+    }),
+  max_content_size_mb: z
+    .string()
+    .min(1, 'Введите значение')
+    .refine((value) => Number.isInteger(Number(value)) && Number(value) >= 10 && Number(value) <= 50_000, {
+      message: 'Значение от 10 до 50000'
+    }),
+  crdt_enabled: z.enum(['true', 'false'])
+});
+
+type PolicyForm = z.infer<typeof policySchema>;
 
 export function ZonesAdmin() {
   const queryClient = useQueryClient();
@@ -21,258 +73,301 @@ export function ZonesAdmin() {
   const allowedZones = useAuthStore((state) => state.zones);
   const isAdmin = hasRole(roles, 'admin');
 
-  const [newZoneName, setNewZoneName] = useState('');
-  const [newZoneDescription, setNewZoneDescription] = useState('');
-  const [selectedZoneId, setSelectedZoneId] = useState('');
-  const [newGroupName, setNewGroupName] = useState('');
+  const [search, setSearch] = useState('');
+  const [page, setPage] = useState(1);
+  const [isCreateOpen, setCreateOpen] = useState(false);
+  const [isPolicyOpen, setPolicyOpen] = useState(false);
+  const [policyZoneId, setPolicyZoneId] = useState('');
+
+  const zoneForm = useForm<CreateZoneForm>({
+    resolver: zodResolver(createZoneSchema),
+    defaultValues: {
+      name: '',
+      description: ''
+    }
+  });
+
+  const policyForm = useForm<PolicyForm>({
+    resolver: zodResolver(policySchema),
+    defaultValues: {
+      max_schedule_slots: '500',
+      max_content_size_mb: '512',
+      crdt_enabled: 'false'
+    }
+  });
 
   const zonesQuery = useQuery({
     queryKey: queryKeys.zones,
     queryFn: zoneService.listZones
   });
 
-  const visibleZones = useMemo(() => {
+  const allVisibleZones = useMemo(() => {
     const zones = zonesQuery.data ?? [];
-    if (isAdmin) {
-      return zones;
-    }
-
-    return zones.filter((zone) => allowedZones.includes(zone.zone_id));
+    return isAdmin ? zones : zones.filter((zone) => allowedZones.includes(zone.zone_id));
   }, [allowedZones, isAdmin, zonesQuery.data]);
 
-  const selectedZone = visibleZones.find((zone) => zone.zone_id === selectedZoneId) ?? visibleZones[0];
+  const filteredZones = useMemo(() => {
+    const lowered = search.toLowerCase();
+    return allVisibleZones.filter(
+      (zone) => zone.name.toLowerCase().includes(lowered) || zone.zone_id.toLowerCase().includes(lowered)
+    );
+  }, [allVisibleZones, search]);
 
-  const groupsQuery = useQuery({
-    queryKey: selectedZone ? queryKeys.zoneGroups(selectedZone.zone_id) : ['groups', 'none'],
-    queryFn: () => zoneService.listGroups(selectedZone.zone_id),
-    enabled: Boolean(selectedZone)
-  });
+  const pageSize = 8;
+  const total = filteredZones.length;
+  const pagedZones = useMemo(() => {
+    const start = (page - 1) * pageSize;
+    return filteredZones.slice(start, start + pageSize);
+  }, [page, filteredZones]);
+
+  const policyZone = useMemo(
+    () => allVisibleZones.find((zone) => zone.zone_id === policyZoneId),
+    [policyZoneId, allVisibleZones]
+  );
 
   const policyQuery = useQuery({
-    queryKey: selectedZone ? queryKeys.zonePolicy(selectedZone.zone_id) : ['policy', 'none'],
-    queryFn: () => zoneService.getPolicy(selectedZone.zone_id),
-    enabled: Boolean(selectedZone)
+    queryKey: policyZoneId ? queryKeys.zonePolicy(policyZoneId) : ['zones', 'policy', 'empty'],
+    queryFn: () => zoneService.getPolicy(policyZoneId),
+    enabled: Boolean(policyZoneId) && isPolicyOpen
   });
 
   const createZone = useMutation({
     mutationFn: zoneService.createZone,
     onSuccess: async () => {
-      setNewZoneName('');
-      setNewZoneDescription('');
+      setCreateOpen(false);
+      zoneForm.reset();
       await queryClient.invalidateQueries({ queryKey: queryKeys.zones });
-      toast.success('Zone создана');
+      toast.success('Zone created');
     },
-    onError: (error) => toast.error(error instanceof Error ? error.message : 'Ошибка создания зоны')
+    onError: (error) => toast.error(error instanceof Error ? error.message : 'Failed to create zone')
   });
 
   const savePolicy = useMutation({
-    mutationFn: (payload: {
-      zoneId: string;
-      max_schedule_slots: number;
-      max_content_size_mb: number;
-      crdt_enabled: boolean;
-    }) =>
-      zoneService.setPolicy(payload.zoneId, {
-        zone_id: payload.zoneId,
-        max_schedule_slots: payload.max_schedule_slots,
-        max_content_size_mb: payload.max_content_size_mb,
+    mutationFn: async (values: PolicyForm) => {
+      if (!policyZone) throw new Error('Выберите зону');
+      return zoneService.setPolicy(policyZone.zone_id, {
+        zone_id: policyZone.zone_id,
+        max_schedule_slots: Number(values.max_schedule_slots),
+        max_content_size_mb: Number(values.max_content_size_mb),
         allowed_content_types: ['video/mp4', 'image/png', 'image/jpeg'],
-        crdt_enabled: payload.crdt_enabled,
+        crdt_enabled: values.crdt_enabled === 'true',
         max_ops_per_minute: 240,
         max_batch_size: 64,
         priority_rules: []
-      }),
-    onSuccess: async () => {
-      if (!selectedZone) return;
-      await queryClient.invalidateQueries({ queryKey: queryKeys.zonePolicy(selectedZone.zone_id) });
-      toast.success('Policy обновлена');
+      });
     },
-    onError: (error) => toast.error(error instanceof Error ? error.message : 'Ошибка policy')
+    onSuccess: async () => {
+      if (!policyZone) return;
+      await queryClient.invalidateQueries({ queryKey: queryKeys.zonePolicy(policyZone.zone_id) });
+      setPolicyOpen(false);
+      toast.success('Policy updated');
+    },
+    onError: (error) => toast.error(error instanceof Error ? error.message : 'Failed to save policy')
   });
 
-  const currentPolicy = policyQuery.data;
+  const syncPolicyForm = useCallback(() => {
+    const current = policyQuery.data;
+    if (!current) return;
 
-  const createGroup = useMutation({
-    mutationFn: ({ zoneId, name }: { zoneId: string; name: string }) => zoneService.createGroup(zoneId, { name }),
-    onSuccess: async () => {
-      if (!selectedZone) return;
-      setNewGroupName('');
-      await queryClient.invalidateQueries({ queryKey: queryKeys.zoneGroups(selectedZone.zone_id) });
-      toast.success('Группа создана');
-    },
-    onError: (error) => toast.error(error instanceof Error ? error.message : 'Ошибка создания группы')
-  });
+    policyForm.reset({
+      max_schedule_slots: String(current.max_schedule_slots),
+      max_content_size_mb: String(current.max_content_size_mb),
+      crdt_enabled: current.crdt_enabled ? 'true' : 'false'
+    });
+  }, [policyForm, policyQuery.data]);
 
-  const deleteGroup = useMutation({
-    mutationFn: ({ zoneId, groupId }: { zoneId: string; groupId: string }) =>
-      zoneService.deleteGroup(zoneId, groupId),
-    onSuccess: async () => {
-      if (!selectedZone) return;
-      await queryClient.invalidateQueries({ queryKey: queryKeys.zoneGroups(selectedZone.zone_id) });
-      toast.success('Группа удалена');
-    },
-    onError: (error) => toast.error(error instanceof Error ? error.message : 'Ошибка удаления группы')
-  });
+  useEffect(() => {
+    syncPolicyForm();
+  }, [syncPolicyForm]);
+
+  const openPolicyDialog = useCallback((zoneId: string) => {
+    setPolicyZoneId(zoneId);
+    setPolicyOpen(true);
+  }, []);
 
   return (
-    <div className="grid gap-4">
-      <Card>
-        <CardHeader>
-          <CardTitle>Zones</CardTitle>
-          <CardDescription>CRUD и zone policy (scope-aware)</CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          {isAdmin ? (
-            <div className="grid gap-2 md:grid-cols-[1fr_1fr_auto]">
-              <Input
-                value={newZoneName}
-                placeholder="Название зоны"
-                onChange={(event) => setNewZoneName(event.target.value)}
-              />
-              <Input
-                value={newZoneDescription}
-                placeholder="Описание"
-                onChange={(event) => setNewZoneDescription(event.target.value)}
-              />
-              <Button
-                onClick={() => createZone.mutate({ name: newZoneName, description: newZoneDescription })}
-                disabled={!newZoneName.trim() || createZone.isPending}
-              >
-                Создать зону
-              </Button>
-            </div>
-          ) : null}
-
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>ID</TableHead>
-                <TableHead>Название</TableHead>
-                <TableHead>Описание</TableHead>
-                <TableHead>Scope</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {visibleZones.map((zone) => (
-                <TableRow key={zone.zone_id}>
-                  <TableCell className="font-mono text-xs">{zone.zone_id}</TableCell>
-                  <TableCell>{zone.name}</TableCell>
-                  <TableCell>{zone.description || '—'}</TableCell>
-                  <TableCell>
-                    <Badge variant={allowedZones.includes(zone.zone_id) ? 'success' : 'secondary'}>
-                      {allowedZones.includes(zone.zone_id) ? 'allowed' : 'read-only'}
-                    </Badge>
-                  </TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        </CardContent>
-      </Card>
-
-      <Card>
-        <CardHeader>
-          <CardTitle>Policy + Screen Groups</CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="max-w-sm">
-            <Label>Зона</Label>
-            <Select
-              value={selectedZone?.zone_id ?? ''}
-              onChange={(event) => setSelectedZoneId(event.target.value)}
-            >
-              {visibleZones.map((zone) => (
-                <option key={zone.zone_id} value={zone.zone_id}>
-                  {zone.name}
-                </option>
-              ))}
-            </Select>
-          </div>
-
-          {selectedZone && currentPolicy ? (
-            <div className="grid gap-2 rounded-md border p-4 md:grid-cols-4">
-              <div>
-                <Label>Max slots</Label>
-                <Input
-                  defaultValue={String(currentPolicy.max_schedule_slots)}
-                  onBlur={(event) => {
-                    savePolicy.mutate({
-                      zoneId: selectedZone.zone_id,
-                      max_schedule_slots: Number(event.target.value),
-                      max_content_size_mb: currentPolicy.max_content_size_mb,
-                      crdt_enabled: currentPolicy.crdt_enabled
-                    });
-                  }}
-                />
-              </div>
-              <div>
-                <Label>Max size MB</Label>
-                <Input
-                  defaultValue={String(currentPolicy.max_content_size_mb)}
-                  onBlur={(event) => {
-                    savePolicy.mutate({
-                      zoneId: selectedZone.zone_id,
-                      max_schedule_slots: currentPolicy.max_schedule_slots,
-                      max_content_size_mb: Number(event.target.value),
-                      crdt_enabled: currentPolicy.crdt_enabled
-                    });
-                  }}
-                />
-              </div>
-              <div className="flex items-end">
-                <Button
-                  variant={currentPolicy.crdt_enabled ? 'success' : 'outline'}
-                  onClick={() =>
-                    savePolicy.mutate({
-                      zoneId: selectedZone.zone_id,
-                      max_schedule_slots: currentPolicy.max_schedule_slots,
-                      max_content_size_mb: currentPolicy.max_content_size_mb,
-                      crdt_enabled: !currentPolicy.crdt_enabled
-                    })
-                  }
-                >
-                  CRDT: {currentPolicy.crdt_enabled ? 'ON' : 'OFF'}
+    <div className="space-y-4">
+      <PageHeader
+        description="Управление зонами вещания, лимитами и CRDT-политиками"
+        actions={
+          isAdmin ? (
+            <Dialog open={isCreateOpen} onOpenChange={setCreateOpen}>
+              <DialogTrigger asChild>
+                <Button>
+                  <Plus className="size-4" />
+                  New zone
                 </Button>
-              </div>
-            </div>
-          ) : null}
-
-          {selectedZone ? (
-            <div className="space-y-3">
-              <div className="grid gap-2 md:grid-cols-[1fr_auto]">
-                <Input
-                  value={newGroupName}
-                  placeholder="Новая screen group"
-                  onChange={(event) => setNewGroupName(event.target.value)}
-                />
-                <Button
-                  onClick={() => createGroup.mutate({ zoneId: selectedZone.zone_id, name: newGroupName })}
-                  disabled={!newGroupName.trim()}
+              </DialogTrigger>
+              <DialogContent>
+                <DialogHeader>
+                  <DialogTitle>Create zone</DialogTitle>
+                  <DialogDescription>Новая зона появится в списке сразу после успешного API-вызова.</DialogDescription>
+                </DialogHeader>
+                <form
+                  className="space-y-4"
+                  onSubmit={zoneForm.handleSubmit((values) => createZone.mutate(values))}
                 >
-                  Добавить группу
-                </Button>
-              </div>
-
-              <div className="rounded-md border">
-                {(groupsQuery.data ?? []).map((group) => (
-                  <div key={group.group_id} className="flex items-center justify-between border-b px-3 py-2 last:border-b-0">
-                    <span>{group.name}</span>
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      onClick={() =>
-                        deleteGroup.mutate({ zoneId: selectedZone.zone_id, groupId: group.group_id })
-                      }
-                    >
-                      Удалить
-                    </Button>
+                  <div className="space-y-2">
+                    <Label htmlFor="zone-name">Name</Label>
+                    <Input id="zone-name" {...zoneForm.register('name')} />
+                    <p className="text-xs text-destructive">{zoneForm.formState.errors.name?.message}</p>
                   </div>
-                ))}
-              </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="zone-desc">Description</Label>
+                    <Input id="zone-desc" {...zoneForm.register('description')} />
+                    <p className="text-xs text-destructive">{zoneForm.formState.errors.description?.message}</p>
+                  </div>
+                  <DialogFooter>
+                    <Button type="submit" disabled={createZone.isPending}>
+                      {createZone.isPending ? 'Creating...' : 'Create zone'}
+                    </Button>
+                  </DialogFooter>
+                </form>
+              </DialogContent>
+            </Dialog>
+          ) : null
+        }
+      />
+
+      <DataTable
+        total={total}
+        page={page}
+        pageSize={pageSize}
+        onPageChange={setPage}
+        toolbar={
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div className="relative w-full sm:max-w-sm">
+              <Search className="pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+              <Input
+                value={search}
+                onChange={(event) => {
+                  setSearch(event.target.value);
+                  setPage(1);
+                }}
+                placeholder="Search by zone name or id"
+                className="pl-8"
+              />
             </div>
-          ) : null}
-        </CardContent>
-      </Card>
+            <StatusBadge tone="neutral" label={`${total} zones`} />
+          </div>
+        }
+      >
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead>Name</TableHead>
+              <TableHead>ID</TableHead>
+              <TableHead>Description</TableHead>
+              <TableHead>Scope</TableHead>
+              <TableHead className="w-[52px]" />
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {zonesQuery.isLoading
+              ? (
+                  <TableRow>
+                    <TableCell colSpan={5} className="py-6 text-center text-sm text-muted-foreground">
+                      Loading zones...
+                    </TableCell>
+                  </TableRow>
+                )
+              : pagedZones.map((zone) => (
+                  <TableRow key={zone.zone_id}>
+                    <TableCell className="font-medium">{zone.name}</TableCell>
+                    <TableCell className="font-mono text-xs">{zone.zone_id}</TableCell>
+                    <TableCell className="max-w-[360px] truncate text-muted-foreground">
+                      {zone.description || '—'}
+                    </TableCell>
+                    <TableCell>
+                      <StatusBadge
+                        tone={allowedZones.includes(zone.zone_id) ? 'success' : 'neutral'}
+                        label={allowedZones.includes(zone.zone_id) ? 'Allowed' : 'Read-only'}
+                      />
+                    </TableCell>
+                    <TableCell>
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                          <Button variant="ghost" size="icon">
+                            <MoreHorizontal className="size-4" />
+                          </Button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end">
+                          <DropdownMenuItem
+                            onClick={async () => {
+                              await navigator.clipboard.writeText(zone.zone_id);
+                              toast.success('Zone ID copied');
+                            }}
+                          >
+                            Copy ID
+                          </DropdownMenuItem>
+                          <DropdownMenuItem onClick={() => openPolicyDialog(zone.zone_id)}>
+                            Edit policy
+                          </DropdownMenuItem>
+                        </DropdownMenuContent>
+                      </DropdownMenu>
+                    </TableCell>
+                  </TableRow>
+                ))}
+          </TableBody>
+        </Table>
+
+        {!zonesQuery.isLoading && !total ? (
+          <div className="p-4">
+            <EmptyState title="No zones found" description="Создайте первую зону или измените строку поиска." />
+          </div>
+        ) : null}
+      </DataTable>
+
+      <Dialog open={isPolicyOpen} onOpenChange={setPolicyOpen}>
+        <DialogContent className="sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Zone policy</DialogTitle>
+            <DialogDescription>
+              {policyZone ? `Настройка лимитов и CRDT-политики для зоны «${policyZone.name}»` : 'Загрузка…'}
+            </DialogDescription>
+          </DialogHeader>
+
+          {policyQuery.isLoading ? (
+            <div className="py-6 text-center text-sm text-muted-foreground">Loading zone policy...</div>
+          ) : (
+            <form
+              className="space-y-4"
+              onSubmit={policyForm.handleSubmit((values) => savePolicy.mutate(values))}
+            >
+              <div className="space-y-2">
+                <Label>Max schedule slots</Label>
+                <Input type="number" {...policyForm.register('max_schedule_slots')} />
+                <p className="text-xs text-destructive">{policyForm.formState.errors.max_schedule_slots?.message}</p>
+              </div>
+
+              <div className="space-y-2">
+                <Label>Max content size (MB)</Label>
+                <Input type="number" {...policyForm.register('max_content_size_mb')} />
+                <p className="text-xs text-destructive">{policyForm.formState.errors.max_content_size_mb?.message}</p>
+              </div>
+
+              <div className="space-y-2">
+                <Label>CRDT mode</Label>
+                <Select value={policyForm.watch('crdt_enabled')} onValueChange={(value) => policyForm.setValue('crdt_enabled', value as 'true' | 'false')}>
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="true">Enabled</SelectItem>
+                    <SelectItem value="false">Disabled</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <DialogFooter>
+                <Button type="submit" disabled={savePolicy.isPending}>
+                  {savePolicy.isPending ? 'Saving...' : 'Save policy'}
+                </Button>
+              </DialogFooter>
+            </form>
+          )}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

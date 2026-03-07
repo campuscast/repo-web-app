@@ -29,6 +29,12 @@ export const contentService = {
   completeUpload: (assetId: string, sha256Hash: string) =>
     apiClient.post(`/content/${assetId}/complete`, { sha256_hash: sha256Hash }, contentAssetSchema),
 
+  renameAsset: (assetId: string, filename: string) =>
+    apiClient.patch<ContentAsset>(`/content/${assetId}`, { filename }, contentAssetSchema),
+
+  deleteAsset: (assetId: string) =>
+    apiClient.delete(`/content/${assetId}`),
+
   list: async (zoneId: string) => {
     const data = await apiClient.get<{ data: ContentAsset[]; pagination: { total: number; page: number; page_size: number } }>(
       `/content?zone_id=${encodeURIComponent(zoneId)}`,

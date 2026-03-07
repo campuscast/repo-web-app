@@ -95,7 +95,14 @@ export async function refreshAccessToken(): Promise<TokenPair | null> {
 
 export async function logout() {
   try {
-    await apiClient.post<void>('/auth/logout', {}, undefined);
+    await fetch('/api/auth/logout', {
+      method: 'POST',
+      credentials: 'include',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({})
+    });
   } catch {
     // Best-effort logout call; local cleanup is required either way.
   }

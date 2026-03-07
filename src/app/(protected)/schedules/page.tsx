@@ -1,5 +1,5 @@
-import { redirect } from 'next/navigation';
+import { SchedulesOverview } from '@/features/schedules/schedules-overview';
 
-export default function SchedulesIndexPage() {
-  redirect('/schedules/default');
+export default function SchedulesPage() {
+  return <SchedulesOverview />;
 }

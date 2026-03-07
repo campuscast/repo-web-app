@@ -1,5 +1,5 @@
-import { ZonesAdmin } from '@/features/zones/zones-admin';
+import { redirect } from 'next/navigation';
 
 export default function ZonesPage() {
-  return <ZonesAdmin />;
+  redirect('/zones');
 }

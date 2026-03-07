@@ -1,25 +1,29 @@
-import { defineConfig, globalIgnores } from 'eslint/config';
-import nextPlugin from '@next/eslint-plugin-next';
-import tsParser from '@typescript-eslint/parser';
+import { defineConfig, globalIgnores } from "eslint/config";
+import nextVitals from "eslint-config-next/core-web-vitals";
+import nextTs from "eslint-config-next/typescript";
 
-export default defineConfig([
-  globalIgnores(['.next/**', 'out/**', 'build/**', 'next-env.d.ts', 'node_modules/**']),
+const eslintConfig = defineConfig([
+  ...nextVitals,
+  ...nextTs,
   {
-    files: ['**/*.{js,mjs,cjs,jsx,ts,tsx}'],
-    languageOptions: {
-      parser: tsParser,
-      parserOptions: {
-        ecmaVersion: 'latest',
-        sourceType: 'module',
-        ecmaFeatures: { jsx: true }
-      }
-    },
-    plugins: {
-      '@next/next': nextPlugin
-    },
     rules: {
-      ...nextPlugin.configs.recommended.rules,
-      ...nextPlugin.configs['core-web-vitals'].rules
-    }
-  }
+      // Legacy feature code uses these patterns intentionally (CRDT sync, form.watch)
+      "react-hooks/set-state-in-effect": "warn",
+      "react-hooks/incompatible-library": "warn",
+    },
+  },
+  // Override default ignores of eslint-config-next.
+  globalIgnores([
+    // Default ignores of eslint-config-next:
+    ".next/**",
+    "out/**",
+    "build/**",
+    "next-env.d.ts",
+    // Animate UI installed components — 3rd-party, don't lint
+    "src/components/animate-ui/**",
+    // Legacy backup
+    "_legacy_backup/**",
+  ]),
 ]);
+
+export default eslintConfig;
