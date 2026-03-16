@@ -157,28 +157,31 @@ export function ScreenGroupsAdmin() {
         onPageChange={setPage}
         toolbar={
           <div className="flex flex-wrap items-center gap-2">
-            <Select
-              value={effectiveZoneId}
-              onValueChange={(value) => {
-                setSelectedZoneId(value);
-                setPage(1);
-              }}
-            >
-              <SelectTrigger className="w-[180px]">
-                <SelectValue placeholder="Select zone" />
-              </SelectTrigger>
-              <SelectContent>
-                {visibleZones.map((zone) => (
-                  <SelectItem key={zone.zone_id} value={zone.zone_id}>
-                    {zone.name}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            <div className="relative min-w-[200px] flex-1">
+            <div className="flex items-center gap-1.5">
+              <span className="shrink-0 text-sm text-muted-foreground">Zone:</span>
+              <Select
+                value={effectiveZoneId}
+                onValueChange={(value) => {
+                  setSelectedZoneId(value);
+                  setPage(1);
+                }}
+              >
+                <SelectTrigger className="w-[180px]">
+                  <SelectValue placeholder="Select zone" />
+                </SelectTrigger>
+                <SelectContent>
+                  {visibleZones.map((zone) => (
+                    <SelectItem key={zone.zone_id} value={zone.zone_id}>
+                      {zone.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="relative w-[260px]">
               <Search className="pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
               <Input
-                placeholder="Search group by name or id"
+                placeholder="Search group"
                 className="pl-8"
                 value={search}
                 onChange={(event) => {
@@ -193,7 +196,7 @@ export function ScreenGroupsAdmin() {
         <Table>
           <TableHeader>
             <TableRow>
-              <TableHead>Group name</TableHead>
+              <TableHead className="pl-4">Group name</TableHead>
               <TableHead>ID</TableHead>
               <TableHead>Zone</TableHead>
               <TableHead className="w-[52px]" />
@@ -210,7 +213,7 @@ export function ScreenGroupsAdmin() {
                 ))
               : paged.map((group) => (
                   <TableRow key={group.group_id}>
-                    <TableCell className="font-medium">{group.name}</TableCell>
+                    <TableCell className="pl-4 font-medium">{group.name}</TableCell>
                     <TableCell className="font-mono text-xs">{group.group_id}</TableCell>
                     <TableCell className="text-sm text-muted-foreground">
                       {visibleZones.find((z) => z.zone_id === group.zone_id)?.name ?? group.zone_id}

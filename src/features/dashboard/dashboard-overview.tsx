@@ -12,7 +12,6 @@ import { useAuthStore } from '@/auth/store';
 import { hasRole } from '@/auth/guards';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { queryKeys } from '@/lib/query-keys';
 import { contentService } from '@/services/content-service';
 import { deviceService } from '@/services/device-service';
@@ -85,12 +84,6 @@ export function DashboardOverview() {
       schedules: schedules.length
     };
   }, [allDevices, contentQueries, schedulesQueries, visibleZones.length]);
-
-  const zoneNameMap = useMemo(() => {
-    const map = new Map<string, string>();
-    for (const z of visibleZones) map.set(z.zone_id, z.name);
-    return map;
-  }, [visibleZones]);
 
   const isAnyLoading = zonesQuery.isLoading || devicesQueries.some((q) => q.isLoading) || contentQueries.some((q) => q.isLoading);
 
@@ -171,70 +164,6 @@ export function DashboardOverview() {
           </CardContent>
         </Card>
       </section>
-
-      {visibleZones.length > 0 && (
-        <section>
-          <Card>
-            <CardHeader>
-              <CardTitle>Active devices</CardTitle>
-              <CardDescription>{stats.activeDevices} active out of {stats.devices} registered</CardDescription>
-            </CardHeader>
-            <CardContent>
-              {allDevices.length > 0 ? (
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>Device</TableHead>
-                      <TableHead>Type</TableHead>
-                      <TableHead>Zone</TableHead>
-                      <TableHead>Status</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {allDevices.slice(0, 10).map((device) => (
-                      <TableRow key={device.device_id}>
-                        <TableCell>
-                          <div className="font-medium">{device.device_name}</div>
-                          <div className="font-mono text-xs text-muted-foreground">{device.device_id}</div>
-                        </TableCell>
-                        <TableCell>{device.device_type}</TableCell>
-                        <TableCell className="text-sm text-muted-foreground">
-                          {zoneNameMap.get(device.zone_id) || device.zone_id}
-                        </TableCell>
-                        <TableCell>
-                          <StatusBadge
-                            tone={
-                              device.status === 'active'
-                                ? 'success'
-                                : device.status === 'pending'
-                                  ? 'warning'
-                                  : device.status === 'offline'
-                                    ? 'danger'
-                                    : 'neutral'
-                            }
-                            label={device.status}
-                          />
-                        </TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              ) : (
-                <div className="py-6 text-center text-sm text-muted-foreground">
-                  No devices registered yet.
-                </div>
-              )}
-              {allDevices.length > 10 && (
-                <div className="mt-3 text-center">
-                  <Button variant="link" size="sm" asChild>
-                    <Link href="/devices">View all {allDevices.length} devices</Link>
-                  </Button>
-                </div>
-              )}
-            </CardContent>
-          </Card>
-        </section>
-      )}
 
       {!visibleZones.length && !zonesQuery.isLoading ? (
         <EmptyState

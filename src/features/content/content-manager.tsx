@@ -553,13 +553,11 @@ export function ContentManager() {
         {/* Two-panel grid */}
         <div className="grid gap-4 lg:grid-cols-[280px_1fr]">
           {/* Upload panel */}
-          <div className="space-y-3 rounded-lg border bg-card p-4">
+          <div className="flex flex-col gap-3 rounded-lg border bg-card p-4">
             <h3 className="text-sm font-semibold">Upload flow</h3>
 
-            <div className="space-y-2">
-              <Label>Media files</Label>
-              <div
-                className={`flex min-h-[100px] cursor-pointer flex-col items-center justify-center gap-2 rounded-md border-2 border-dashed p-4 text-center transition-colors ${isDragOver ? 'border-primary bg-primary/5' : 'border-muted-foreground/25 hover:border-muted-foreground/50'}`}
+            <div
+              className={`flex flex-1 cursor-pointer flex-col items-center justify-center gap-2 rounded-md border-2 border-dashed p-4 text-center transition-colors ${isDragOver ? 'border-primary bg-primary/5' : 'border-muted-foreground/25 hover:border-muted-foreground/50'}`}
                 onDrop={handleFileDrop}
                 onDragOver={handleDragOver}
                 onDragLeave={handleDragLeave}
@@ -577,15 +575,14 @@ export function ContentManager() {
                   </>
                 )}
               </div>
-              <input
-                ref={fileInputRef}
-                type="file"
-                className="hidden"
-                multiple
-                accept={ACCEPTED_EXTENSIONS}
-                onChange={handleFileInputChange}
-              />
-            </div>
+            <input
+              ref={fileInputRef}
+              type="file"
+              className="hidden"
+              multiple
+              accept={ACCEPTED_EXTENSIONS}
+              onChange={handleFileInputChange}
+            />
 
             {/* Selected files list */}
             {selectedFiles.length > 0 && (
@@ -636,20 +633,23 @@ export function ContentManager() {
             onPageChange={setPage}
             toolbar={
               <div className="flex flex-wrap items-center gap-2">
-                <Select
-                  value={statusFilter}
-                  onValueChange={(value) => setStatusFilter(value as typeof statusFilter)}
-                >
-                  <SelectTrigger className="w-[150px]">
-                    <SelectValue placeholder="Status" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all">All statuses</SelectItem>
-                    <SelectItem value="ready">Ready</SelectItem>
-                    <SelectItem value="uploading">Uploading</SelectItem>
-                  </SelectContent>
-                </Select>
-                <div className="relative min-w-[200px] flex-1">
+                <div className="flex items-center gap-1.5">
+                  <span className="shrink-0 text-sm text-muted-foreground">Status:</span>
+                  <Select
+                    value={statusFilter}
+                    onValueChange={(value) => setStatusFilter(value as typeof statusFilter)}
+                  >
+                    <SelectTrigger className="w-[150px]">
+                      <SelectValue placeholder="Status" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">All statuses</SelectItem>
+                      <SelectItem value="ready">Ready</SelectItem>
+                      <SelectItem value="uploading">Uploading</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="relative w-[260px]">
                   <Search className="pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
                   <Input
                     value={search}
@@ -657,7 +657,7 @@ export function ContentManager() {
                       setSearch(event.target.value);
                       setPage(1);
                     }}
-                    placeholder="Search by filename"
+                    placeholder="Search file"
                     className="pl-8"
                   />
                 </div>

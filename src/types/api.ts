@@ -61,7 +61,11 @@ export const deviceSchema = z.object({
   device_type: z.string(),
   zone_id: z.string(),
   group_id: z.string(),
-  status: z.enum(['pending', 'active', 'revoked', 'offline'])
+  status: z.enum(['pending', 'active', 'revoked', 'offline']),
+  hardware_id: z.string().nullable().optional(),
+  mqtt_client_id: z.string().nullable().optional(),
+  enrolled_at: z.string().nullable().optional(),
+  last_seen: z.string().nullable().optional()
 });
 
 export const registerDeviceRequestSchema = z.object({
@@ -72,11 +76,37 @@ export const registerDeviceRequestSchema = z.object({
   group_id: z.string().min(1)
 });
 
+export const createPendingRequestSchema = z.object({
+  device_name: z.string().min(1),
+  zone_id: z.string().min(1),
+  group_id: z.string().min(1),
+  hardware_id: z.string().optional()
+});
+
+export const updateDeviceRequestSchema = z.object({
+  device_name: z.string().min(1).optional(),
+  device_type: z.string().optional()
+});
+
 export const registerDeviceResponseSchema = z.object({
   device_id: z.string(),
   device_token: z.string(),
   mqtt_client_id: z.string(),
   mqtt_topic_prefix: z.string()
+});
+
+export const createPendingDeviceResponseSchema = z.object({
+  device_id: z.string(),
+  player_id: z.string().optional()
+});
+
+export const activationResponseSchema = z.object({
+  device_id: z.string(),
+  device_token: z.string().nullable(),
+  mqtt_client_id: z.string(),
+  mqtt_topic_prefix: z.string(),
+  token_expires_at: z.string().optional(),
+  already_active: z.boolean().optional()
 });
 
 export const initUploadRequestSchema = z.object({
@@ -204,7 +234,11 @@ export type ScreenGroup = z.infer<typeof screenGroupSchema>;
 export type ZonePolicy = z.infer<typeof zonePolicySchema>;
 export type Device = z.infer<typeof deviceSchema>;
 export type RegisterDeviceRequest = z.infer<typeof registerDeviceRequestSchema>;
+export type CreatePendingRequest = z.infer<typeof createPendingRequestSchema>;
+export type UpdateDeviceRequest = z.infer<typeof updateDeviceRequestSchema>;
 export type RegisterDeviceResponse = z.infer<typeof registerDeviceResponseSchema>;
+export type CreatePendingDeviceResponse = z.infer<typeof createPendingDeviceResponseSchema>;
+export type ActivationResponse = z.infer<typeof activationResponseSchema>;
 export type InitUploadRequest = z.infer<typeof initUploadRequestSchema>;
 export type InitUploadResponse = z.infer<typeof initUploadResponseSchema>;
 export type ContentAsset = z.infer<typeof contentAssetSchema>;

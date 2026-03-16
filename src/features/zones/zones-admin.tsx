@@ -235,8 +235,8 @@ export function ZonesAdmin() {
         pageSize={pageSize}
         onPageChange={setPage}
         toolbar={
-          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-            <div className="relative w-full sm:max-w-sm">
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="relative w-[260px]">
               <Search className="pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
               <Input
                 value={search}
@@ -244,7 +244,7 @@ export function ZonesAdmin() {
                   setSearch(event.target.value);
                   setPage(1);
                 }}
-                placeholder="Search by zone name or id"
+                placeholder="Search zone"
                 className="pl-8"
               />
             </div>
@@ -255,7 +255,7 @@ export function ZonesAdmin() {
         <Table>
           <TableHeader>
             <TableRow>
-              <TableHead>Name</TableHead>
+              <TableHead className="pl-4">Name</TableHead>
               <TableHead>ID</TableHead>
               <TableHead>Description</TableHead>
               <TableHead>Scope</TableHead>
@@ -273,7 +273,7 @@ export function ZonesAdmin() {
                 )
               : pagedZones.map((zone) => (
                   <TableRow key={zone.zone_id}>
-                    <TableCell className="font-medium">{zone.name}</TableCell>
+                    <TableCell className="pl-4 font-medium">{zone.name}</TableCell>
                     <TableCell className="font-mono text-xs">{zone.zone_id}</TableCell>
                     <TableCell className="max-w-[360px] truncate text-muted-foreground">
                       {zone.description || '—'}

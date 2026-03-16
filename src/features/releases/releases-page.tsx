@@ -153,26 +153,29 @@ export function ReleasesPage() {
         onPageChange={setPage}
         toolbar={
           <div className="flex flex-wrap items-center gap-2">
-            <Select
-              value={effectiveZoneId}
-              onValueChange={(value) => {
-                setSelectedZoneId(value);
-                setPage(1);
-              }}
-            >
-              <SelectTrigger className="w-[180px]">
-                <SelectValue placeholder="Select zone" />
-              </SelectTrigger>
-              <SelectContent>
-                {visibleZones.map((zone) => (
-                  <SelectItem key={zone.zone_id} value={zone.zone_id}>
-                    {zone.name}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            <div className="flex items-center gap-1.5">
+              <span className="shrink-0 text-sm text-muted-foreground">Zone:</span>
+              <Select
+                value={effectiveZoneId}
+                onValueChange={(value) => {
+                  setSelectedZoneId(value);
+                  setPage(1);
+                }}
+              >
+                <SelectTrigger className="w-[180px]">
+                  <SelectValue placeholder="Select zone" />
+                </SelectTrigger>
+                <SelectContent>
+                  {visibleZones.map((zone) => (
+                    <SelectItem key={zone.zone_id} value={zone.zone_id}>
+                      {zone.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
 
-            <div className="relative min-w-[200px] flex-1">
+            <div className="relative w-[260px]">
               <Search className="pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
               <Input
                 className="pl-8"
@@ -190,7 +193,7 @@ export function ReleasesPage() {
         <Table>
           <TableHeader>
             <TableRow>
-              <TableHead>Schedule</TableHead>
+              <TableHead className="pl-4">Schedule</TableHead>
               <TableHead>Version</TableHead>
               <TableHead>Schedule status</TableHead>
               <TableHead>Rollout status</TableHead>
@@ -210,7 +213,7 @@ export function ReleasesPage() {
                   const rollout = inferRolloutFromSchedule(row.status);
                   return (
                     <TableRow key={row.schedule_id}>
-                      <TableCell>
+                      <TableCell className="pl-4">
                         <div className="font-medium">{row.name}</div>
                         <div className="font-mono text-xs text-muted-foreground">{row.schedule_id}</div>
                       </TableCell>

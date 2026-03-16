@@ -1,5 +1,6 @@
 'use client';
 
+import Image from 'next/image';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { ChevronsUpDown, LogOut, Settings, UserCircle2 } from 'lucide-react';
@@ -52,8 +53,23 @@ export function AppSidebar() {
           <SidebarMenuItem>
             <SidebarMenuButton size="lg" asChild>
               <Link href="/dashboard">
-                <div className="grid size-8 shrink-0 place-items-center rounded-lg bg-primary text-primary-foreground text-xs font-bold">
-                  CC
+                <div className="grid size-10 shrink-0 place-items-center rounded-xl bg-muted">
+                  <Image
+                    src="/cms-icon-light.svg"
+                    alt="CampusCast logo"
+                    width={28}
+                    height={28}
+                    className="size-7 dark:hidden"
+                    priority
+                  />
+                  <Image
+                    src="/cms-icon-dark.svg"
+                    alt="CampusCast logo"
+                    width={28}
+                    height={28}
+                    className="hidden size-7 dark:block"
+                    priority
+                  />
                 </div>
                 <div className="grid flex-1 text-left text-sm leading-tight">
                   <span className="truncate font-semibold">

@@ -46,6 +46,10 @@ export function getPathTitle(pathname: string) {
     return 'Schedule Editor';
   }
 
+  if (pathname.startsWith('/devices/')) {
+    return 'Player Details';
+  }
+
   const direct = PATH_TITLES[pathname];
   if (direct) return direct;
 

@@ -4,9 +4,15 @@ import {
   deviceSchema,
   registerDeviceRequestSchema,
   registerDeviceResponseSchema,
+  createPendingDeviceResponseSchema,
+  activationResponseSchema,
   type Device,
   type RegisterDeviceRequest,
-  type RegisterDeviceResponse
+  type RegisterDeviceResponse,
+  type CreatePendingRequest,
+  type CreatePendingDeviceResponse,
+  type UpdateDeviceRequest,
+  type ActivationResponse
 } from '@/types/api';
 
 const devicesListSchema = z.object({
@@ -16,15 +22,35 @@ const devicesListSchema = z.object({
 export const deviceService = {
   getDevice: (deviceId: string): Promise<Device> => apiClient.get(`/devices/${deviceId}`, deviceSchema),
 
+  /** Legacy: register + activate in one call. */
   register: (payload: RegisterDeviceRequest): Promise<RegisterDeviceResponse> => {
     const parsed = registerDeviceRequestSchema.parse(payload);
     return apiClient.post('/devices/register', parsed, registerDeviceResponseSchema);
   },
 
+  /** Create pending device (status='pending', no token issued). */
+  createPending: (payload: CreatePendingRequest): Promise<CreatePendingDeviceResponse> =>
+    apiClient.post('/enrollment/create', payload, createPendingDeviceResponseSchema),
+
+  /** Update device fields (name, type). */
+  updateDevice: (deviceId: string, updates: UpdateDeviceRequest): Promise<Device> =>
+    apiClient.patch(`/devices/${deviceId}`, updates, deviceSchema),
+
+  /** Activate device by activation code. */
+  activateByCode: (deviceId: string, activationCode: string): Promise<ActivationResponse> =>
+    apiClient.post('/enrollment/activate-by-code', { device_id: deviceId, activation_code: activationCode }, activationResponseSchema),
+
+  /** Activate device by MAC address. */
+  activateByMac: (deviceId: string, hardwareId: string): Promise<ActivationResponse> =>
+    apiClient.post('/enrollment/activate-by-mac', { device_id: deviceId, hardware_id: hardwareId }, activationResponseSchema),
+
   assign: (deviceId: string, groupId: string): Promise<Device> =>
     apiClient.put(`/devices/${deviceId}/assign`, { group_id: groupId }, deviceSchema),
 
-  // Not present in OpenAPI yet; keeps UI ready for future /devices listing endpoint.
+  /** Permanently delete a device. */
+  deleteDevice: (deviceId: string): Promise<{ success: boolean }> =>
+    apiClient.delete(`/devices/${deviceId}`),
+
   listByZone: async (zoneId: string): Promise<Device[]> => {
     const data = await apiClient.get<{ data: Device[] }>(
       `/devices?zone_id=${encodeURIComponent(zoneId)}`,

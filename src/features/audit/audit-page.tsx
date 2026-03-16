@@ -167,22 +167,25 @@ export function AuditPage() {
         onPageChange={setPage}
         toolbar={
           <div className="flex flex-wrap items-center gap-2">
-            <Select value={severity} onValueChange={(value) => setSeverity(value as typeof severity)}>
-              <SelectTrigger className="w-[160px]">
-                <SelectValue placeholder="Severity" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All severities</SelectItem>
-                <SelectItem value="info">info</SelectItem>
-                <SelectItem value="warning">warning</SelectItem>
-                <SelectItem value="error">error</SelectItem>
-              </SelectContent>
-            </Select>
-            <div className="relative min-w-[200px] flex-1">
+            <div className="flex items-center gap-1.5">
+              <span className="shrink-0 text-sm text-muted-foreground">Severity:</span>
+              <Select value={severity} onValueChange={(value) => setSeverity(value as typeof severity)}>
+                <SelectTrigger className="w-[160px]">
+                  <SelectValue placeholder="Severity" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All severities</SelectItem>
+                  <SelectItem value="info">info</SelectItem>
+                  <SelectItem value="warning">warning</SelectItem>
+                  <SelectItem value="error">error</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="relative w-[260px]">
               <Search className="pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
               <Input
                 className="pl-8"
-                placeholder="Search actor/action/target"
+                placeholder="Search event"
                 value={search}
                 onChange={(event) => {
                   setSearch(event.target.value);
@@ -196,7 +199,7 @@ export function AuditPage() {
         <Table>
           <TableHeader>
             <TableRow>
-              <TableHead>Time</TableHead>
+              <TableHead className="pl-4">Time</TableHead>
               <TableHead>Actor</TableHead>
               <TableHead>Action</TableHead>
               <TableHead>Target</TableHead>
@@ -206,7 +209,7 @@ export function AuditPage() {
           <TableBody>
             {paged.map((event) => (
               <TableRow key={event.id}>
-                <TableCell>{new Date(event.happened_at).toLocaleString()}</TableCell>
+                <TableCell className="pl-4">{new Date(event.happened_at).toLocaleString()}</TableCell>
                 <TableCell>{event.actor}</TableCell>
                 <TableCell>{event.action}</TableCell>
                 <TableCell>{event.target}</TableCell>

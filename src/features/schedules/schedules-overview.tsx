@@ -119,38 +119,44 @@ export function SchedulesOverview() {
         onPageChange={setPage}
         toolbar={
           <div className="flex flex-wrap items-center gap-2">
-            <Select
-              value={effectiveZoneId}
-              onValueChange={(value) => {
-                setSelectedZoneId(value);
-                setPage(1);
-              }}
-            >
-              <SelectTrigger className="w-[180px]">
-                <SelectValue placeholder="Select zone" />
-              </SelectTrigger>
-              <SelectContent>
-                {visibleZones.map((zone) => (
-                  <SelectItem key={zone.zone_id} value={zone.zone_id}>
-                    {zone.name}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            <div className="flex items-center gap-1.5">
+              <span className="shrink-0 text-sm text-muted-foreground">Zone:</span>
+              <Select
+                value={effectiveZoneId}
+                onValueChange={(value) => {
+                  setSelectedZoneId(value);
+                  setPage(1);
+                }}
+              >
+                <SelectTrigger className="w-[180px]">
+                  <SelectValue placeholder="Select zone" />
+                </SelectTrigger>
+                <SelectContent>
+                  {visibleZones.map((zone) => (
+                    <SelectItem key={zone.zone_id} value={zone.zone_id}>
+                      {zone.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
 
-            <Select value={statusFilter} onValueChange={(value) => setStatusFilter(value as typeof statusFilter)}>
-              <SelectTrigger className="w-[160px]">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All statuses</SelectItem>
-                <SelectItem value="draft">draft</SelectItem>
-                <SelectItem value="locked">locked</SelectItem>
-                <SelectItem value="published">published</SelectItem>
-              </SelectContent>
-            </Select>
+            <div className="flex items-center gap-1.5">
+              <span className="shrink-0 text-sm text-muted-foreground">Status:</span>
+              <Select value={statusFilter} onValueChange={(value) => setStatusFilter(value as typeof statusFilter)}>
+                <SelectTrigger className="w-[160px]">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All statuses</SelectItem>
+                  <SelectItem value="draft">draft</SelectItem>
+                  <SelectItem value="locked">locked</SelectItem>
+                  <SelectItem value="published">published</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
 
-            <div className="relative min-w-[200px] flex-1">
+            <div className="relative w-[260px]">
               <Search className="pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
               <Input
                 className="pl-8"
@@ -159,7 +165,7 @@ export function SchedulesOverview() {
                   setSearch(event.target.value);
                   setPage(1);
                 }}
-                placeholder="Search by name or id"
+                placeholder="Search schedule"
               />
             </div>
           </div>
@@ -168,7 +174,7 @@ export function SchedulesOverview() {
         <Table>
           <TableHeader>
             <TableRow>
-              <TableHead>Name</TableHead>
+              <TableHead className="pl-4">Name</TableHead>
               <TableHead>Schedule ID</TableHead>
               <TableHead>Status</TableHead>
               <TableHead>Version</TableHead>
@@ -186,7 +192,7 @@ export function SchedulesOverview() {
                 ))
               : paged.map((schedule) => (
                   <TableRow key={schedule.schedule_id}>
-                    <TableCell className="font-medium">{schedule.name}</TableCell>
+                    <TableCell className="pl-4 font-medium">{schedule.name}</TableCell>
                     <TableCell className="font-mono text-xs">{schedule.schedule_id}</TableCell>
                     <TableCell>
                       <StatusBadge

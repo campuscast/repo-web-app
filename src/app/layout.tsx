@@ -15,6 +15,21 @@ const notoSans = Noto_Sans({
 export const metadata: Metadata = {
   title: env.appName,
   description: 'Distributed Media CMS Web UI',
+  icons: {
+    icon: [
+      {
+        url: '/cms-icon-light.svg',
+        type: 'image/svg+xml',
+        media: '(prefers-color-scheme: light)',
+      },
+      {
+        url: '/cms-icon-dark.svg',
+        type: 'image/svg+xml',
+        media: '(prefers-color-scheme: dark)',
+      },
+    ],
+    shortcut: '/cms-icon-light.svg',
+  },
 };
 
 export default function RootLayout({ children }: { children: ReactNode }) {

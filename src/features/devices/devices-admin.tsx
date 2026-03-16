@@ -1,11 +1,9 @@
 'use client';
 
-import { useMemo, useState } from 'react';
-import { useForm } from 'react-hook-form';
-import { zodResolver } from '@hookform/resolvers/zod';
-import { z } from 'zod';
+import { useCallback, useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { MoreHorizontal, Plus, Search } from 'lucide-react';
+import { useRouter, useSearchParams } from 'next/navigation';
+import { Film, Info, MoreHorizontal, Plus, Search, Settings, Tags, Trash2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { useAuthStore } from '@/auth/store';
 import { hasRole } from '@/auth/guards';
@@ -13,24 +11,25 @@ import { DataTable } from '@/components/common/data-table';
 import { EmptyState } from '@/components/common/empty-state';
 import { PageHeader } from '@/components/common/page-header';
 import { StatusBadge } from '@/components/common/status-badge';
-import { Button } from '@/components/ui/button';
 import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger
-} from '@/components/ui/dialog';
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle
+} from '@/components/ui/alert-dialog';
+import { Button } from '@/components/ui/button';
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuSeparator,
   DropdownMenuTrigger
 } from '@/components/ui/dropdown-menu';
 import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
 import {
   Select,
   SelectContent,
@@ -40,43 +39,55 @@ import {
 } from '@/components/ui/select';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import { formatPlayerId } from '@/lib/player-id';
 import { queryKeys } from '@/lib/query-keys';
 import { deviceService } from '@/services/device-service';
 import { zoneService } from '@/services/zone-service';
-import type { RegisterDeviceRequest } from '@/types/api';
+import { RegisterDeviceWizard } from './register-device-wizard';
 
-const registerSchema = z.object({
-  device_name: z.string().min(2, 'Введите имя устройства'),
-  device_type: z.enum(['web', 'desktop', 'android_tv']),
-  hardware_id: z.string().optional(),
-  zone_id: z.string().min(1, 'Выберите зону'),
-  group_id: z.string().min(1, 'Выберите группу')
-});
+/* ─── Constants ────────────────────────────────────────────────── */
 
-type RegisterForm = z.infer<typeof registerSchema>;
+const DEVICE_TYPE_LABELS: Record<string, string> = {
+  android_tv: 'Android TV',
+  desktop: 'Desktop',
+  web: 'Web Player'
+};
+
+function formatDeviceType(type: string | null | undefined): string {
+  if (!type) return '—';
+  return DEVICE_TYPE_LABELS[type] ?? type;
+}
+
+/* ─── URL sync helper ──────────────────────────────────────────── */
+
+function syncUrlParams(zone: string, status: string, q: string) {
+  const params = new URLSearchParams();
+  if (zone) params.set('zone', zone);
+  if (status && status !== 'all') params.set('status', status);
+  if (q) params.set('q', q);
+  const qs = params.toString();
+  window.history.replaceState(null, '', qs ? `/devices?${qs}` : '/devices');
+}
+
+/* ─── Main Component ───────────────────────────────────────────── */
 
 export function DevicesAdmin() {
+  const router = useRouter();
+  const searchParams = useSearchParams();
   const queryClient = useQueryClient();
   const roles = useAuthStore((state) => state.roles);
   const allowedZones = useAuthStore((state) => state.zones);
   const isAdmin = hasRole(roles, 'admin');
 
-  const [search, setSearch] = useState('');
-  const [statusFilter, setStatusFilter] = useState<'all' | 'active' | 'pending' | 'offline' | 'revoked'>('all');
+  // Restore filter state from URL on mount
+  const [search, setSearch] = useState(searchParams.get('q') || '');
+  const [statusFilter, setStatusFilter] = useState<'all' | 'active' | 'pending' | 'offline' | 'revoked'>(
+    (searchParams.get('status') as 'all' | 'active' | 'pending' | 'offline' | 'revoked') || 'all'
+  );
   const [page, setPage] = useState(1);
-  const [selectedZoneId, setSelectedZoneId] = useState('');
-  const [isDialogOpen, setDialogOpen] = useState(false);
-
-  const form = useForm<RegisterForm>({
-    resolver: zodResolver(registerSchema),
-    defaultValues: {
-      device_name: '',
-      device_type: 'web',
-      hardware_id: '',
-      zone_id: '',
-      group_id: ''
-    }
-  });
+  const [selectedZoneId, setSelectedZoneId] = useState(searchParams.get('zone') || '');
+  const [isWizardOpen, setWizardOpen] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState<{ id: string; name: string } | null>(null);
 
   const zonesQuery = useQuery({ queryKey: queryKeys.zones, queryFn: zoneService.listZones });
 
@@ -85,13 +96,7 @@ export function DevicesAdmin() {
     return isAdmin ? zones : zones.filter((zone) => allowedZones.includes(zone.zone_id));
   }, [allowedZones, isAdmin, zonesQuery.data]);
 
-  const effectiveZoneId = selectedZoneId || form.watch('zone_id') || visibleZones[0]?.zone_id || '';
-
-  const groupsQuery = useQuery({
-    queryKey: effectiveZoneId ? queryKeys.zoneGroups(effectiveZoneId) : ['devices', 'groups', 'none'],
-    queryFn: () => zoneService.listGroups(effectiveZoneId),
-    enabled: Boolean(effectiveZoneId)
-  });
+  const effectiveZoneId = selectedZoneId || visibleZones[0]?.zone_id || '';
 
   const devicesQuery = useQuery({
     queryKey: effectiveZoneId ? queryKeys.devices(effectiveZoneId) : ['devices', 'none'],
@@ -99,32 +104,45 @@ export function DevicesAdmin() {
     enabled: Boolean(effectiveZoneId)
   });
 
-  const registerMutation = useMutation({
-    mutationFn: (payload: RegisterDeviceRequest) => deviceService.register(payload),
+  const deleteMutation = useMutation({
+    mutationFn: (deviceId: string) => deviceService.deleteDevice(deviceId),
     onSuccess: async () => {
-      setDialogOpen(false);
-      form.reset({
-        device_name: '',
-        device_type: 'web',
-        hardware_id: '',
-        zone_id: effectiveZoneId,
-        group_id: ''
-      });
       await queryClient.invalidateQueries({ queryKey: queryKeys.devices(effectiveZoneId) });
-      toast.success('Device registered');
+      toast.success('Player deleted');
+      setDeleteTarget(null);
     },
-    onError: (error) => toast.error(error instanceof Error ? error.message : 'Registration failed')
+    onError: (error) => {
+      toast.error(error instanceof Error ? error.message : 'Failed to delete');
+      setDeleteTarget(null);
+    }
   });
 
-  const assignMutation = useMutation({
-    mutationFn: ({ deviceId, groupId }: { deviceId: string; groupId: string }) =>
-      deviceService.assign(deviceId, groupId),
-    onSuccess: async () => {
-      await queryClient.invalidateQueries({ queryKey: queryKeys.devices(effectiveZoneId) });
-      toast.success('Device reassigned');
+  // Filter handlers with URL sync
+  const handleZoneChange = useCallback(
+    (value: string) => {
+      setSelectedZoneId(value);
+      setPage(1);
+      syncUrlParams(value, statusFilter, search);
     },
-    onError: (error) => toast.error(error instanceof Error ? error.message : 'Failed to assign device')
-  });
+    [statusFilter, search]
+  );
+
+  const handleStatusChange = useCallback(
+    (value: string) => {
+      setStatusFilter(value as typeof statusFilter);
+      syncUrlParams(effectiveZoneId, value, search);
+    },
+    [effectiveZoneId, search]
+  );
+
+  const handleSearchChange = useCallback(
+    (value: string) => {
+      setSearch(value);
+      setPage(1);
+      syncUrlParams(effectiveZoneId, statusFilter, value);
+    },
+    [effectiveZoneId, statusFilter]
+  );
 
   const filtered = useMemo(() => {
     const rows = devicesQuery.data ?? [];
@@ -132,7 +150,9 @@ export function DevicesAdmin() {
 
     return rows.filter((device) => {
       const matchSearch =
-        device.device_name.toLowerCase().includes(lowered) || device.device_id.toLowerCase().includes(lowered);
+        device.device_name.toLowerCase().includes(lowered)
+        || device.device_id.toLowerCase().includes(lowered)
+        || formatPlayerId(device.device_id).toLowerCase().includes(lowered);
       const matchStatus = statusFilter === 'all' || device.status === statusFilter;
       return matchSearch && matchStatus;
     });
@@ -147,102 +167,48 @@ export function DevicesAdmin() {
       <PageHeader
         description="Регистрация плееров, назначение в группы и мониторинг статусов"
         actions={
-          <Dialog open={isDialogOpen} onOpenChange={setDialogOpen}>
-            <DialogTrigger asChild>
-              <Button>
-                <Plus className="size-4" />
-                Register device
-              </Button>
-            </DialogTrigger>
-            <DialogContent>
-              <DialogHeader>
-                <DialogTitle>Register new device</DialogTitle>
-                <DialogDescription>После регистрации устройство получит device token и появится в списке.</DialogDescription>
-              </DialogHeader>
-              <form className="grid gap-3" onSubmit={form.handleSubmit((values) => registerMutation.mutate(values))}>
-                <div className="space-y-2">
-                  <Label>Zone</Label>
-                  <Select
-                    value={form.watch('zone_id') || effectiveZoneId}
-                    onValueChange={(value) => {
-                      form.setValue('zone_id', value, { shouldValidate: true });
-                      form.setValue('group_id', '', { shouldValidate: true });
-                    }}
-                  >
-                    <SelectTrigger>
-                      <SelectValue placeholder="Select zone" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {visibleZones.map((zone) => (
-                        <SelectItem key={zone.zone_id} value={zone.zone_id}>
-                          {zone.name}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                  <p className="text-xs text-destructive">{form.formState.errors.zone_id?.message}</p>
-                </div>
-
-                <div className="space-y-2">
-                  <Label>Screen group</Label>
-                  <Select
-                    value={form.watch('group_id')}
-                    onValueChange={(value) => form.setValue('group_id', value, { shouldValidate: true })}
-                  >
-                    <SelectTrigger>
-                      <SelectValue placeholder="Select group" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {(groupsQuery.data ?? []).map((group) => (
-                        <SelectItem key={group.group_id} value={group.group_id}>
-                          {group.name}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                  <p className="text-xs text-destructive">{form.formState.errors.group_id?.message}</p>
-                </div>
-
-                <div className="space-y-2">
-                  <Label>Device name</Label>
-                  <Input {...form.register('device_name')} />
-                  <p className="text-xs text-destructive">{form.formState.errors.device_name?.message}</p>
-                </div>
-
-                <div className="space-y-2">
-                  <Label>Device type</Label>
-                  <Select
-                    value={form.watch('device_type')}
-                    onValueChange={(value) =>
-                      form.setValue('device_type', value as RegisterForm['device_type'], { shouldValidate: true })
-                    }
-                  >
-                    <SelectTrigger>
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="web">web</SelectItem>
-                      <SelectItem value="desktop">desktop</SelectItem>
-                      <SelectItem value="android_tv">android_tv</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-
-                <div className="space-y-2">
-                  <Label>Hardware ID</Label>
-                  <Input {...form.register('hardware_id')} />
-                </div>
-
-                <DialogFooter>
-                  <Button type="submit" disabled={registerMutation.isPending}>
-                    {registerMutation.isPending ? 'Registering...' : 'Register'}
-                  </Button>
-                </DialogFooter>
-              </form>
-            </DialogContent>
-          </Dialog>
+          <Button onClick={() => setWizardOpen(true)}>
+            <Plus className="size-4" />
+            Register player
+          </Button>
         }
       />
+
+      <RegisterDeviceWizard
+        open={isWizardOpen}
+        onOpenChange={setWizardOpen}
+        onComplete={(zoneId) => {
+          if (zoneId) {
+            setSelectedZoneId(zoneId);
+            queryClient.invalidateQueries({ queryKey: queryKeys.devices(zoneId) });
+            syncUrlParams(zoneId, statusFilter, search);
+          }
+          queryClient.invalidateQueries({ queryKey: queryKeys.devices(effectiveZoneId) });
+        }}
+      />
+
+      {/* Delete confirmation dialog */}
+      <AlertDialog open={!!deleteTarget} onOpenChange={(open) => !open && setDeleteTarget(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete player?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This will permanently delete <strong>{deleteTarget?.name}</strong> and revoke
+              all its credentials. This action cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              onClick={() => deleteTarget && deleteMutation.mutate(deleteTarget.id)}
+              disabled={deleteMutation.isPending}
+            >
+              {deleteMutation.isPending ? 'Deleting...' : 'Delete'}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       <DataTable
         total={total}
@@ -251,48 +217,45 @@ export function DevicesAdmin() {
         onPageChange={setPage}
         toolbar={
           <div className="flex flex-wrap items-center gap-2">
-            <Select
-              value={effectiveZoneId}
-              onValueChange={(value) => {
-                setSelectedZoneId(value);
-                setPage(1);
-              }}
-            >
-              <SelectTrigger className="w-[180px]">
-                <SelectValue placeholder="Zone" />
-              </SelectTrigger>
-              <SelectContent>
-                {visibleZones.map((zone) => (
-                  <SelectItem key={zone.zone_id} value={zone.zone_id}>
-                    {zone.name}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            <div className="flex items-center gap-1.5">
+              <span className="shrink-0 text-sm text-muted-foreground">Zone:</span>
+              <Select value={effectiveZoneId} onValueChange={handleZoneChange}>
+                <SelectTrigger className="w-[180px]">
+                  <SelectValue placeholder="Zone" />
+                </SelectTrigger>
+                <SelectContent>
+                  {visibleZones.map((zone) => (
+                    <SelectItem key={zone.zone_id} value={zone.zone_id}>
+                      {zone.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
 
-            <Select value={statusFilter} onValueChange={(value) => setStatusFilter(value as typeof statusFilter)}>
-              <SelectTrigger className="w-[160px]">
-                <SelectValue placeholder="Status" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All statuses</SelectItem>
-                <SelectItem value="active">active</SelectItem>
-                <SelectItem value="pending">pending</SelectItem>
-                <SelectItem value="offline">offline</SelectItem>
-                <SelectItem value="revoked">revoked</SelectItem>
-              </SelectContent>
-            </Select>
+            <div className="flex items-center gap-1.5">
+              <span className="shrink-0 text-sm text-muted-foreground">Status:</span>
+              <Select value={statusFilter} onValueChange={handleStatusChange}>
+                <SelectTrigger className="w-[160px]">
+                  <SelectValue placeholder="Status" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All statuses</SelectItem>
+                  <SelectItem value="active">active</SelectItem>
+                  <SelectItem value="pending">pending</SelectItem>
+                  <SelectItem value="offline">offline</SelectItem>
+                  <SelectItem value="revoked">revoked</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
 
-            <div className="relative min-w-[200px] flex-1">
+            <div className="relative w-[260px]">
               <Search className="pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
               <Input
                 className="pl-8"
                 value={search}
-                onChange={(event) => {
-                  setSearch(event.target.value);
-                  setPage(1);
-                }}
-                placeholder="Search by name or id"
+                onChange={(event) => handleSearchChange(event.target.value)}
+                placeholder="Search by name"
               />
             </div>
           </div>
@@ -301,10 +264,9 @@ export function DevicesAdmin() {
         <Table>
           <TableHeader>
             <TableRow>
-              <TableHead>Device</TableHead>
+              <TableHead className="pl-4">Device</TableHead>
               <TableHead>Type</TableHead>
               <TableHead>Status</TableHead>
-              <TableHead>Group</TableHead>
               <TableHead className="w-[52px]" />
             </TableRow>
           </TableHeader>
@@ -312,18 +274,19 @@ export function DevicesAdmin() {
             {devicesQuery.isLoading
               ? Array.from({ length: 6 }).map((_, index) => (
                   <TableRow key={index}>
-                    <TableCell colSpan={5}>
+                    <TableCell colSpan={4}>
                       <Skeleton className="h-8 w-full" />
                     </TableCell>
                   </TableRow>
                 ))
               : paged.map((device) => (
                   <TableRow key={device.device_id}>
-                    <TableCell>
+                    <TableCell className="pl-4">
                       <div className="font-medium">{device.device_name}</div>
-                      <div className="font-mono text-xs text-muted-foreground">{device.device_id}</div>
                     </TableCell>
-                    <TableCell>{device.device_type}</TableCell>
+                    <TableCell className="text-muted-foreground">
+                      {formatDeviceType(device.device_type)}
+                    </TableCell>
                     <TableCell>
                       <StatusBadge
                         tone={
@@ -339,23 +302,6 @@ export function DevicesAdmin() {
                       />
                     </TableCell>
                     <TableCell>
-                      <Select
-                        value={device.group_id}
-                        onValueChange={(groupId) => assignMutation.mutate({ deviceId: device.device_id, groupId })}
-                      >
-                        <SelectTrigger className="h-8">
-                          <SelectValue placeholder="Assign group" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {(groupsQuery.data ?? []).map((group) => (
-                            <SelectItem key={group.group_id} value={group.group_id}>
-                              {group.name}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </TableCell>
-                    <TableCell>
                       <DropdownMenu>
                         <DropdownMenuTrigger asChild>
                           <Button variant="ghost" size="icon">
@@ -363,13 +309,29 @@ export function DevicesAdmin() {
                           </Button>
                         </DropdownMenuTrigger>
                         <DropdownMenuContent align="end">
+                          <DropdownMenuItem onClick={() => router.push(`/devices/${device.device_id}?tab=info`)}>
+                            <Info className="mr-2 size-4" />
+                            Info
+                          </DropdownMenuItem>
+                          <DropdownMenuItem onClick={() => router.push(`/devices/${device.device_id}?tab=settings`)}>
+                            <Settings className="mr-2 size-4" />
+                            Settings
+                          </DropdownMenuItem>
+                          <DropdownMenuItem onClick={() => router.push(`/devices/${device.device_id}?tab=content`)}>
+                            <Film className="mr-2 size-4" />
+                            Content
+                          </DropdownMenuItem>
+                          <DropdownMenuItem onClick={() => router.push(`/devices/${device.device_id}?tab=criteria`)}>
+                            <Tags className="mr-2 size-4" />
+                            Criteria & Tags
+                          </DropdownMenuItem>
+                          <DropdownMenuSeparator />
                           <DropdownMenuItem
-                            onClick={async () => {
-                              await navigator.clipboard.writeText(device.device_id);
-                              toast.success('Device ID copied');
-                            }}
+                            className="text-destructive focus:text-destructive"
+                            onClick={() => setDeleteTarget({ id: device.device_id, name: device.device_name })}
                           >
-                            Copy ID
+                            <Trash2 className="mr-2 size-4" />
+                            Delete
                           </DropdownMenuItem>
                         </DropdownMenuContent>
                       </DropdownMenu>
@@ -384,8 +346,8 @@ export function DevicesAdmin() {
             <EmptyState
               title="No devices"
               description="В выбранной зоне пока нет устройств. Зарегистрируйте первый player."
-              actionLabel="Register device"
-              onAction={() => setDialogOpen(true)}
+              actionLabel="Register player"
+              onAction={() => setWizardOpen(true)}
             />
           </div>
         ) : null}
