@@ -51,6 +51,25 @@ export const rolesListSchema = z.object({
   available_permissions: z.array(z.string()).default([])
 });
 
+export const auditEventSchema = z.object({
+  event_id: z.string(),
+  event_type: z.string(),
+  actor_type: z.string().default(''),
+  actor_id: z.string().default(''),
+  zone_id: z.string().nullable().optional(),
+  resource_type: z.string().nullable().optional(),
+  resource_id: z.string().nullable().optional(),
+  action: z.string().default(''),
+  detail: z.record(z.string(), z.unknown()).default({}),
+  correlation_id: z.string().nullable().optional(),
+  timestamp: z.string(),
+});
+
+export const auditEventsListSchema = z.object({
+  data: z.array(auditEventSchema).default([]),
+  pagination: paginationSchema.default({ total: 0, page: 1, page_size: 20 }),
+});
+
 export const zoneSchema = z.object({
   zone_id: z.string(),
   name: z.string(),
@@ -280,3 +299,4 @@ export type ValidationResult = z.infer<typeof validationResultSchema>;
 export type PublishResponse = z.infer<typeof publishResponseSchema>;
 export type AdminUser = z.infer<typeof adminUserSchema>;
 export type AdminRole = z.infer<typeof roleSchema>;
+export type AuditEvent = z.infer<typeof auditEventSchema>;

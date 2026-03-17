@@ -7,6 +7,7 @@ import {
 } from '@/types/api';
 import { useAuthStore } from '@/auth/store';
 import { env } from '@/lib/env';
+import { getCsrfTokenFromCookie } from '@/auth/csrf';
 
 type LoginCredentials = {
   email: string;
@@ -32,9 +33,13 @@ export async function login(credentials: LoginCredentials): Promise<UserMe> {
 }
 
 export async function refreshAccessToken(): Promise<TokenPair | null> {
+  const csrfToken = getCsrfTokenFromCookie();
   const response = await fetch(`${env.apiPrefix}/auth/refresh`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: {
+      'Content-Type': 'application/json',
+      ...(csrfToken ? { 'X-CSRF-Token': csrfToken } : {})
+    },
     credentials: 'include',
     body: JSON.stringify({ refresh_token: '' })
   });

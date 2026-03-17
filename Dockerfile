@@ -1,5 +1,3 @@
-# syntax=docker/dockerfile:1.7
-
 FROM node:20-alpine AS deps
 RUN corepack enable && corepack prepare pnpm@latest --activate
 WORKDIR /app

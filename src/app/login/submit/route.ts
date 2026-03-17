@@ -1,9 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { env } from '@/lib/env';
 import { tokenPairSchema } from '@/types/api';
+import { randomBytes } from 'crypto';
 
 const ACCESS_TOKEN_COOKIE = 'cc_access_token';
 const REFRESH_TOKEN_COOKIE = 'refresh_token';
+const CSRF_TOKEN_COOKIE = 'csrf_token';
 
 function redirectTo(path: string) {
   return new NextResponse(null, {
@@ -66,6 +68,15 @@ export async function POST(request: NextRequest) {
       httpOnly: true,
     });
   }
+
+  response.cookies.set({
+    name: CSRF_TOKEN_COOKIE,
+    value: randomBytes(32).toString('hex'),
+    sameSite: 'lax',
+    path: '/',
+    secure: isSecure,
+    httpOnly: false,
+  });
 
   return response;
 }

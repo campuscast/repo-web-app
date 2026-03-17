@@ -1,11 +1,3 @@
-'use client';
-
-import { useEffect, useState } from 'react';
-import { useRouter } from 'next/navigation';
-import { useForm } from 'react-hook-form';
-import { zodResolver } from '@hookform/resolvers/zod';
-import { z } from 'zod';
-import { toast } from 'sonner';
 import { LockKeyhole, ShieldCheck } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
@@ -17,50 +9,21 @@ import {
 } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { login } from '@/services/auth-service';
+const ERROR_MESSAGES: Record<string, string> = {
+  missing_credentials: 'Enter login and password',
+  invalid_credentials: 'Invalid login or password',
+  invalid_response: 'Invalid auth response',
+};
 
-const loginSchema = z.object({
-  email: z.string().min(1, 'Enter login'),
-  password: z.string().min(1, 'Enter password'),
-});
-
-type LoginForm = z.infer<typeof loginSchema>;
-
-export default function LoginPage() {
-  const router = useRouter();
-  const [isSubmitting, setSubmitting] = useState(false);
-
-  useEffect(() => {
-    if (typeof window === 'undefined') return;
-    const current = new URLSearchParams(window.location.search);
-    if (!current.has('email') && !current.has('password')) return;
-
-    const sanitized = new URLSearchParams(current.toString());
-    sanitized.delete('email');
-    sanitized.delete('password');
-    const query = sanitized.toString();
-    router.replace(query ? `/login?${query}` : '/login');
-  }, [router]);
-
-  const form = useForm<LoginForm>({
-    resolver: zodResolver(loginSchema),
-    defaultValues: { email: '', password: '' },
-  });
-
-  const onSubmit = form.handleSubmit(async (values) => {
-    try {
-      setSubmitting(true);
-      await login(values);
-      router.replace('/dashboard');
-      router.refresh();
-    } catch (error) {
-      toast.error(
-        error instanceof Error ? error.message : 'Login failed',
-      );
-    } finally {
-      setSubmitting(false);
-    }
-  });
+export default async function LoginPage({
+  searchParams,
+}: {
+  searchParams?: Promise<Record<string, string | string[] | undefined>>;
+}) {
+  const params = (await searchParams) ?? {};
+  const rawError = params.error;
+  const errorKey = Array.isArray(rawError) ? rawError[0] : rawError;
+  const errorMessage = errorKey ? ERROR_MESSAGES[errorKey] ?? 'Login failed' : null;
 
   return (
     <main className="flex min-h-screen items-center justify-center bg-muted/30 p-4">
@@ -72,7 +35,6 @@ export default function LoginPage() {
         <CardContent className="space-y-6">
           <form
             className="space-y-4"
-            onSubmit={onSubmit}
             method="post"
             action="/login/submit"
           >
@@ -82,11 +44,9 @@ export default function LoginPage() {
                 id="email"
                 type="text"
                 autoComplete="username"
-                {...form.register('email')}
+                name="email"
+                required
               />
-              <p className="text-xs text-destructive">
-                {form.formState.errors.email?.message}
-              </p>
             </div>
 
             <div className="space-y-1.5">
@@ -95,16 +55,18 @@ export default function LoginPage() {
                 id="password"
                 type="password"
                 autoComplete="current-password"
-                {...form.register('password')}
+                name="password"
+                required
               />
-              <p className="text-xs text-destructive">
-                {form.formState.errors.password?.message}
-              </p>
             </div>
 
-            <Button className="w-full" type="submit" disabled={isSubmitting}>
-              {isSubmitting ? 'Signing in...' : 'Sign in'}
+            <Button className="w-full" type="submit">
+              Sign in
             </Button>
+
+            {errorMessage ? (
+              <p className="text-sm text-destructive">{errorMessage}</p>
+            ) : null}
           </form>
 
           <div className="space-y-2 border-t pt-4 text-sm text-muted-foreground">
