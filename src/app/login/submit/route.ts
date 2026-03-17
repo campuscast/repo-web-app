@@ -53,7 +53,7 @@ export async function POST(request: NextRequest) {
     sameSite: 'lax',
     path: '/',
     secure: isSecure,
-    httpOnly: false,
+    httpOnly: true,
   });
 
   if (parsed.data.refresh_token) {

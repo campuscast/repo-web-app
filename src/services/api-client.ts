@@ -1,6 +1,5 @@
 import { env } from '@/lib/env';
 import { getCsrfTokenFromCookie } from '@/auth/csrf';
-import { getAccessToken } from '@/auth/token-store';
 import { refreshAccessToken } from '@/services/auth-service';
 
 type ApiSchema<T> = {
@@ -50,7 +49,6 @@ async function request<T>(options: RequestOptions<T>): Promise<T> {
     signal
   } = options;
 
-  const token = auth ? getAccessToken() : null;
   const csrfToken = method !== 'GET' ? getCsrfTokenFromCookie() : null;
 
   const timeoutController = new AbortController();
@@ -64,7 +62,6 @@ async function request<T>(options: RequestOptions<T>): Promise<T> {
       method,
       headers: {
         'Content-Type': 'application/json',
-        ...(token ? { Authorization: `Bearer ${token}` } : {}),
         ...(csrfToken ? { 'X-CSRF-Token': csrfToken } : {})
       },
       credentials: 'include',

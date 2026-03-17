@@ -38,9 +38,12 @@ function fallbackMeFromAccessToken(accessToken: string): UserMe | null {
     const roles = Array.isArray(decoded.roles) ? decoded.roles.map(String) : [];
     const zones = Array.isArray(decoded.zone_ids) ? decoded.zone_ids.map(String) : [];
 
+    const permissions = Array.isArray(decoded.permissions) ? decoded.permissions.map(String) : [];
+
     return {
       user: { id: sub, email, name },
       roles,
+      permissions,
       zones,
       crdt_enabled: false
     };

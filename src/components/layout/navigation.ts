@@ -8,6 +8,7 @@ import {
   Rocket,
   ScrollText,
   Settings,
+  Users,
   type LucideIcon,
 } from 'lucide-react';
 
@@ -26,6 +27,7 @@ export const APP_NAV_ITEMS: AppNavItem[] = [
   { href: '/schedules', label: 'Schedules', icon: CalendarClock },
   { href: '/releases', label: 'Releases', icon: Rocket },
   { href: '/audit', label: 'Audit', icon: ScrollText },
+  { href: '/admin/users', label: 'Users', icon: Users },
   { href: '/settings', label: 'Settings', icon: Settings },
 ];
 
@@ -38,6 +40,7 @@ const PATH_TITLES: Record<string, string> = {
   '/schedules': 'Schedules',
   '/releases': 'Releases',
   '/audit': 'Audit',
+  '/admin/users': 'User Management',
   '/settings': 'Settings',
 };
 

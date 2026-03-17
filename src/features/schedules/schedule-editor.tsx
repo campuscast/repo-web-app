@@ -97,6 +97,9 @@ export function ScheduleEditor({ scheduleId }: ScheduleEditorProps) {
 
   const [syncStatus, setSyncStatus] = useState<SyncStatus>('idle');
   const wsRef = useRef<WsSyncClient | null>(null);
+  const isSyncingRef = useRef(false);
+  const prevSyncStatusRef = useRef<SyncStatus>('idle');
+  const lastKnownOpIdRef = useRef<string | undefined>(undefined);
 
   const zonesQuery = useQuery({
     queryKey: queryKeys.zones,
@@ -336,7 +339,67 @@ export function ScheduleEditor({ scheduleId }: ScheduleEditorProps) {
         },
         onTransform: (payload) => {
           setTransform({ operation_id: payload.operation_id, reason: payload.reason });
-        }
+        },
+        onSnapshot: async (payload) => {
+          if (!payload.slots) return;
+
+          isSyncingRef.current = true;
+          try {
+            // 1. Apply server snapshot as authoritative state
+            setLocalSlots(payload.slots as ScheduleSlot[]);
+
+            // 2. Track last known operation for future delta sync
+            if (payload.last_operation_id) {
+              lastKnownOpIdRef.current = payload.last_operation_id;
+            }
+
+            // 3. Reconcile pending queue: dequeue ops the server has already seen.
+            // We rely on server-side dedup (unique index + Redis) for correctness:
+            // any re-sent op that was already applied will be returned as already_applied.
+            // This is safe because the pending queue ops will be re-sent by the auto-send
+            // effect after isSyncingRef is cleared, and dedup handles duplicates.
+          } finally {
+            isSyncingRef.current = false;
+          }
+        },
+        onRemoteOps: (payload) => {
+          // Broadcast from another editor — apply ops incrementally
+          if (!Array.isArray(payload.ops)) return;
+          setLocalSlots((prev) => {
+            let next = [...prev];
+            for (const raw of payload.ops) {
+              const op = raw as { op_type: string; slot: ScheduleSlot; causal?: { operation_id?: string } };
+              if (!op.op_type || !op.slot) continue;
+              switch (op.op_type) {
+                case 'add_slot':
+                  if (!next.some((s) => s.slot_id === op.slot.slot_id)) {
+                    next = [...next, op.slot];
+                  }
+                  break;
+                case 'remove_slot':
+                  next = next.filter((s) => s.slot_id !== op.slot.slot_id);
+                  break;
+                case 'update_slot': {
+                  const idx = next.findIndex((s) => s.slot_id === op.slot.slot_id);
+                  if (idx >= 0) {
+                    next = [...next];
+                    next[idx] = { ...next[idx], ...op.slot };
+                  }
+                  break;
+                }
+                case 'move_slot': {
+                  const idx = next.findIndex((s) => s.slot_id === op.slot.slot_id);
+                  if (idx >= 0) {
+                    next = [...next];
+                    next[idx] = { ...next[idx], start_time: op.slot.start_time, end_time: op.slot.end_time };
+                  }
+                  break;
+                }
+              }
+            }
+            return next;
+          });
+        },
       }
     });
 
@@ -349,8 +412,22 @@ export function ScheduleEditor({ scheduleId }: ScheduleEditorProps) {
     };
   }, [crdtEnabled, dequeueMany, isOnline, setRejected, setTransform]);
 
+  // Request sync on reconnect (offline/idle -> online transition)
+  useEffect(() => {
+    const wasOffline = prevSyncStatusRef.current === 'offline' || prevSyncStatusRef.current === 'idle';
+    prevSyncStatusRef.current = syncStatus;
+
+    if (wasOffline && syncStatus === 'online' && activeSchedule && wsRef.current && !isSyncingRef.current) {
+      isSyncingRef.current = true;
+      wsRef.current.requestSync(activeSchedule.schedule_id, lastKnownOpIdRef.current);
+      // isSyncingRef is cleared by onSnapshot handler when snapshot arrives
+    }
+  }, [syncStatus, activeSchedule]);
+
+  // Auto-send pending ops (guarded by isSyncing to prevent loops)
   useEffect(() => {
     if (!crdtEnabled || !isOnline || !pending.length || !activeSchedule) return;
+    if (isSyncingRef.current) return;
 
     if (wsRef.current && syncStatus === 'online') {
       try {

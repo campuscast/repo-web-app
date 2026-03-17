@@ -19,8 +19,36 @@ export const userMeSchema = z.object({
     name: z.string().optional()
   }),
   roles: z.array(z.string()).default([]),
+  permissions: z.array(z.string()).default([]),
   zones: z.array(z.string()).default([]),
   crdt_enabled: z.boolean().default(false)
+});
+
+export const roleSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  permissions: z.array(z.string()).default([])
+});
+
+export const adminUserSchema = z.object({
+  id: z.string(),
+  email: z.string(),
+  name: z.string(),
+  status: z.string(),
+  must_change_password: z.boolean().default(false),
+  roles: z.array(roleSchema).default([]),
+  created_at: z.string().default(''),
+  updated_at: z.string().default('')
+});
+
+export const adminUsersListSchema = z.object({
+  data: z.array(adminUserSchema).default([]),
+  pagination: paginationSchema.default({ total: 0, page: 1, page_size: 20 })
+});
+
+export const rolesListSchema = z.object({
+  data: z.array(roleSchema).default([]),
+  available_permissions: z.array(z.string()).default([])
 });
 
 export const zoneSchema = z.object({
@@ -250,3 +278,5 @@ export type LockResponse = z.infer<typeof lockResponseSchema>;
 export type ValidationIssue = z.infer<typeof validationIssueSchema>;
 export type ValidationResult = z.infer<typeof validationResultSchema>;
 export type PublishResponse = z.infer<typeof publishResponseSchema>;
+export type AdminUser = z.infer<typeof adminUserSchema>;
+export type AdminRole = z.infer<typeof roleSchema>;

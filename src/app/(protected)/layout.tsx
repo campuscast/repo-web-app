@@ -12,7 +12,7 @@ export default async function ProtectedLayout({
 
   return (
     <>
-      <AuthHydrator me={session.me} accessToken={session.accessToken} />
+      <AuthHydrator me={session.me} />
       <AppShell>{children}</AppShell>
     </>
   );
