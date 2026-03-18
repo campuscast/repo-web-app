@@ -12,16 +12,38 @@ export const tokenPairSchema = z.object({
   expires_in: z.number().int().positive().default(900)
 });
 
+export const mfaLoginChallengeSchema = z.object({
+  mfa_required: z.literal(true),
+  mfa_token: z.string().min(1),
+  expires_in: z.number().int().positive().default(300),
+});
+
+export const loginResponseSchema = z.union([tokenPairSchema, mfaLoginChallengeSchema]);
+
 export const userMeSchema = z.object({
   user: z.object({
     id: z.string(),
     email: z.string().min(1),
-    name: z.string().optional()
+    name: z.string().optional(),
+    must_change_password: z.boolean().default(false),
   }),
   roles: z.array(z.string()).default([]),
   permissions: z.array(z.string()).default([]),
   zones: z.array(z.string()).default([]),
+  mfa_enabled: z.boolean().default(false),
   crdt_enabled: z.boolean().default(false)
+});
+
+export const mfaStatusSchema = z.object({
+  mfa_enabled: z.boolean().default(false),
+  has_secret: z.boolean().default(false),
+});
+
+export const mfaSetupSchema = z.object({
+  secret: z.string(),
+  issuer: z.string(),
+  account_name: z.string(),
+  otpauth_uri: z.string(),
 });
 
 export const roleSchema = z.object({
@@ -35,10 +57,20 @@ export const adminUserSchema = z.object({
   email: z.string(),
   name: z.string(),
   status: z.string(),
+  online: z.boolean().default(false),
   must_change_password: z.boolean().default(false),
   roles: z.array(roleSchema).default([]),
   created_at: z.string().default(''),
   updated_at: z.string().default('')
+});
+
+export const adminUserZoneAssignmentSchema = z.object({
+  zone_id: z.string(),
+  role: z.string().default(''),
+});
+
+export const adminUserDetailsSchema = adminUserSchema.extend({
+  zones: z.array(adminUserZoneAssignmentSchema).default([]),
 });
 
 export const adminUsersListSchema = z.object({
@@ -188,14 +220,76 @@ export const contentListResponseSchema = z.object({
   pagination: paginationSchema.default({ total: 0, page: 1, page_size: 20 })
 });
 
+export const publicationTransitionSchema = z.object({
+  type: z.enum(['cut', 'fade']).default('cut'),
+  duration_ms: z.number().int().nonnegative().default(0),
+}).partial();
+
+export const publicationSlideSchema = z.object({
+  background: z.string().default(''),
+  title: z.string().default(''),
+  body: z.string().default(''),
+  image_asset_id: z.string().default(''),
+  logo_asset_id: z.string().default(''),
+  layout: z.enum(['centered', 'split', 'title-top']).default('centered'),
+}).partial();
+
+export const publicationVideoSchema = z.object({
+  asset_id: z.string(),
+  trim_in_ms: z.number().int().nonnegative().default(0),
+  trim_out_ms: z.number().int().nonnegative().default(0),
+  mute: z.boolean().default(true),
+  loop: z.boolean().default(true),
+}).partial();
+
+export const publicationItemSchema = z.object({
+  item_id: z.string().default(''),
+  type: z.enum(['custom_slide', 'video_asset']),
+  title: z.string().default(''),
+  duration_ms: z.number().int().positive().default(10000),
+  transition: publicationTransitionSchema.default({}),
+  slide: publicationSlideSchema.optional(),
+  video: publicationVideoSchema.optional(),
+  metadata: z.record(z.string(), z.unknown()).default({}),
+});
+
+export const publicationSchema = z.object({
+  publication_id: z.string(),
+  zone_id: z.string(),
+  title: z.string(),
+  type: z.string().default('slideshow'),
+  status: z.string().default('draft'),
+  version: z.number().int().positive().default(1),
+  items: z.array(publicationItemSchema).default([]),
+  metadata: z.record(z.string(), z.unknown()).default({}),
+  created_at: z.string().nullable().default(null),
+  updated_at: z.string().nullable().default(null),
+});
+
+export const publicationsListResponseSchema = z.object({
+  data: z.array(publicationSchema).default([]),
+  pagination: paginationSchema.default({ total: 0, page: 1, page_size: 20 }),
+});
+
+export const slotMetadataSchema = z.object({
+  transition_type: z.enum(['cut', 'fade']).default('cut'),
+  transition_duration_ms: z.number().int().nonnegative().default(0),
+  video_trim_in_ms: z.number().int().nonnegative().default(0),
+  video_trim_out_ms: z.number().int().nonnegative().default(0),
+  video_mute: z.boolean().default(true),
+  video_loop: z.boolean().default(true),
+}).partial();
+
 export const scheduleSlotSchema = z.object({
   slot_id: z.string(),
-  asset_id: z.string(),
+  asset_id: z.preprocess((value) => (value == null ? '' : value), z.string()),
+  publication_id: z.preprocess((value) => (value == null ? '' : value), z.string()),
   start_time: z.string(),
   end_time: z.string(),
   priority: z.number().int(),
   zone_id: z.string(),
-  group_id: z.string().default('')
+  group_id: z.string().default(''),
+  metadata: slotMetadataSchema.optional(),
 });
 
 export const scheduleSchema = z.object({
@@ -229,6 +323,14 @@ export const scheduleOpSchema = z.object({
     parent_op_id: z.string().optional(),
     session_id: z.string().optional()
   }),
+  actor: z
+    .object({
+      auth_type: z.enum(['user_session', 'device_token']).optional(),
+      user_id: z.string().optional(),
+      device_id: z.string().optional(),
+      session_id: z.string().optional()
+    })
+    .optional(),
   signature: z
     .object({
       signature: z.string().optional(),
@@ -237,6 +339,18 @@ export const scheduleOpSchema = z.object({
     })
     .optional(),
   slot: scheduleSlotSchema
+});
+
+export const signedScheduleOpSchema = scheduleOpSchema.extend({
+  signature: z.object({
+    signature: z.string(),
+    key_id: z.string(),
+    algorithm: z.string()
+  })
+});
+
+export const signOpsResponseSchema = z.object({
+  ops: z.array(signedScheduleOpSchema).default([])
 });
 
 export const ingestOpsResponseSchema = z.object({
@@ -275,7 +389,11 @@ export const publishResponseSchema = z.object({
 });
 
 export type TokenPair = z.infer<typeof tokenPairSchema>;
+export type MfaLoginChallenge = z.infer<typeof mfaLoginChallengeSchema>;
+export type LoginResponse = z.infer<typeof loginResponseSchema>;
 export type UserMe = z.infer<typeof userMeSchema>;
+export type MfaStatus = z.infer<typeof mfaStatusSchema>;
+export type MfaSetup = z.infer<typeof mfaSetupSchema>;
 export type Zone = z.infer<typeof zoneSchema>;
 export type ScreenGroup = z.infer<typeof screenGroupSchema>;
 export type ZonePolicy = z.infer<typeof zonePolicySchema>;
@@ -289,14 +407,19 @@ export type ActivationResponse = z.infer<typeof activationResponseSchema>;
 export type InitUploadRequest = z.infer<typeof initUploadRequestSchema>;
 export type InitUploadResponse = z.infer<typeof initUploadResponseSchema>;
 export type ContentAsset = z.infer<typeof contentAssetSchema>;
+export type PublicationItem = z.infer<typeof publicationItemSchema>;
+export type Publication = z.infer<typeof publicationSchema>;
 export type Schedule = z.infer<typeof scheduleSchema>;
 export type ScheduleSlot = z.infer<typeof scheduleSlotSchema>;
+export type SlotMetadata = z.infer<typeof slotMetadataSchema>;
 export type ScheduleOp = z.infer<typeof scheduleOpSchema>;
+export type SignedScheduleOp = z.infer<typeof signedScheduleOpSchema>;
 export type IngestOpsResponse = z.infer<typeof ingestOpsResponseSchema>;
 export type LockResponse = z.infer<typeof lockResponseSchema>;
 export type ValidationIssue = z.infer<typeof validationIssueSchema>;
 export type ValidationResult = z.infer<typeof validationResultSchema>;
 export type PublishResponse = z.infer<typeof publishResponseSchema>;
 export type AdminUser = z.infer<typeof adminUserSchema>;
+export type AdminUserDetails = z.infer<typeof adminUserDetailsSchema>;
 export type AdminRole = z.infer<typeof roleSchema>;
 export type AuditEvent = z.infer<typeof auditEventSchema>;

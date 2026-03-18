@@ -39,12 +39,14 @@ function fallbackMeFromAccessToken(accessToken: string): UserMe | null {
     const zones = Array.isArray(decoded.zone_ids) ? decoded.zone_ids.map(String) : [];
 
     const permissions = Array.isArray(decoded.permissions) ? decoded.permissions.map(String) : [];
+    const mfaEnabled = decoded.mfa_verified === false;
 
     return {
-      user: { id: sub, email, name },
+      user: { id: sub, email, name, must_change_password: false },
       roles,
       permissions,
       zones,
+      mfa_enabled: mfaEnabled,
       crdt_enabled: false
     };
   } catch {

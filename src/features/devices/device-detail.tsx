@@ -16,6 +16,7 @@ import {
   Save
 } from 'lucide-react';
 import { toast } from 'sonner';
+import { ActivationCodeInput } from '@/components/ui/activation-code-input';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -164,15 +165,16 @@ function TabInfo({ device, onUpdated }: { device: Device; onUpdated: () => void 
             <p className="text-xs text-muted-foreground">
               Enter the 6-digit activation code displayed on the player screen.
             </p>
-            <div className="flex items-center gap-2">
-              <Input
-                placeholder="Enter 6-digit code"
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <ActivationCodeInput
                 value={activationCode}
-                onChange={(e) => setActivationCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
-                maxLength={6}
-                className="max-w-[200px] font-mono text-lg tracking-widest"
+                onChange={setActivationCode}
+                autoFocus
+                className="justify-start"
+                aria-label="Activation code"
               />
               <Button
+                className="sm:self-end"
                 disabled={activationCode.length !== 6 || activateMutation.isPending}
                 onClick={() => activateMutation.mutate()}
               >

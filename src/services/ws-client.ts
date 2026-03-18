@@ -1,5 +1,13 @@
 import type { ScheduleOp } from '@/types/api';
 
+type MissingOpDelta = {
+  op_type: string;
+  operation_id: string;
+  slot_data?: unknown;
+  lamport_ts?: number;
+  client_id?: string;
+};
+
 export type SyncStatus = 'idle' | 'connecting' | 'online' | 'degraded' | 'offline';
 
 type Handlers = {
@@ -13,7 +21,7 @@ type Handlers = {
     epoch?: number;
     snapshot_hash?: string;
     last_operation_id?: string;
-    missing_ops?: unknown[];
+    missing_ops?: MissingOpDelta[];
   }) => void;
   onRemoteOps?: (payload: { schedule_id: string; ops: unknown[] }) => void;
   onStatus?: (status: SyncStatus) => void;
@@ -63,7 +71,7 @@ type SnapshotMsg = {
   epoch?: number;
   snapshot_hash?: string;
   last_operation_id?: string;
-  missing_ops?: unknown[];
+  missing_ops?: MissingOpDelta[];
 };
 
 type WsOutbound = OpsAppliedMsg | BatchRejectedMsg | OpsRejectedMsg | SnapshotMsg;

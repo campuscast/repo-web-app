@@ -6,6 +6,7 @@ import {
   lockResponseSchema,
   publishResponseSchema,
   scheduleOpSchema,
+  signOpsResponseSchema,
   scheduleSchema,
   schedulesListResponseSchema,
   validationResultSchema,
@@ -13,6 +14,7 @@ import {
   type PublishResponse,
   type Schedule,
   type ScheduleOp,
+  type SignedScheduleOp,
   type ScheduleSlot,
   type ValidationResult
 } from '@/types/api';
@@ -59,5 +61,14 @@ export const scheduleService = {
       `/schedules/${scheduleId}/ops`,
       { ops: ops.map((op) => scheduleOpSchema.parse(op)) },
       ingestOpsResponseSchema
-    )
+    ),
+
+  signOps: (scheduleId: string, ops: ScheduleOp[]): Promise<SignedScheduleOp[]> =>
+    apiClient
+      .post(
+        `/schedules/${scheduleId}/ops/sign`,
+        { ops: ops.map((op) => scheduleOpSchema.parse(op)) },
+        signOpsResponseSchema
+      )
+      .then((result) => result.ops)
 };

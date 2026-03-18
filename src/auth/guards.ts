@@ -1,4 +1,7 @@
 export function hasRole(roles: string[], role: string) {
+  if (role === 'admin') {
+    return roles.includes('admin') || roles.includes('super_admin');
+  }
   return roles.includes(role);
 }
 

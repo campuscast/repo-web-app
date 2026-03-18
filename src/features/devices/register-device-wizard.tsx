@@ -19,6 +19,7 @@ import { toast } from 'sonner';
 import { useAuthStore } from '@/auth/store';
 import { hasRole } from '@/auth/guards';
 import { Badge } from '@/components/ui/badge';
+import { ActivationCodeInput } from '@/components/ui/activation-code-input';
 import { Button } from '@/components/ui/button';
 import {
   Dialog,
@@ -459,15 +460,13 @@ function StepActivatePlayer({
               </div>
 
               <div className="space-y-2">
-                <Label htmlFor="activation_code">Activation code</Label>
-                <Input
-                  id="activation_code"
-                  placeholder="Enter 6-digit code from the player screen"
+                <Label>Activation code</Label>
+                <ActivationCodeInput
                   value={activationCode}
-                  onChange={(e) => setActivationCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
-                  maxLength={6}
-                  className="font-mono text-lg tracking-widest"
-                  autoFocus
+                  onChange={setActivationCode}
+                  autoFocus={activeTab === 'code'}
+                  className="justify-start"
+                  aria-label="Activation code"
                 />
                 <p className="text-xs text-muted-foreground">
                   The code is valid for 15 minutes after generation.

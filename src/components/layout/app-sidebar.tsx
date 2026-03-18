@@ -1,6 +1,5 @@
 'use client';
 
-import Image from 'next/image';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { ChevronsUpDown, LogOut, Settings, UserCircle2 } from 'lucide-react';
@@ -45,6 +44,14 @@ export function AppSidebar() {
   const roles = useAuthStore((state) => state.roles);
   const zones = useAuthStore((state) => state.zones);
   const crdtEnabled = useAuthStore((state) => state.crdtEnabled);
+  const hasPermission = useAuthStore((state) => state.hasPermission);
+  const isAdmin = useAuthStore((state) => state.isAdmin);
+
+  const visibleNavItems = APP_NAV_ITEMS.filter((item) => {
+    if (item.adminOnly && !isAdmin()) return false;
+    if (item.requiredPermission && !hasPermission(item.requiredPermission)) return false;
+    return true;
+  });
 
   return (
     <Sidebar collapsible="icon">
@@ -54,22 +61,7 @@ export function AppSidebar() {
             <SidebarMenuButton size="lg" asChild>
               <Link href="/dashboard">
                 <div className="grid size-10 shrink-0 place-items-center rounded-xl bg-muted">
-                  <Image
-                    src="/cms-icon-light.svg"
-                    alt="CampusCast logo"
-                    width={28}
-                    height={28}
-                    className="size-7 dark:hidden"
-                    priority
-                  />
-                  <Image
-                    src="/cms-icon-dark.svg"
-                    alt="CampusCast logo"
-                    width={28}
-                    height={28}
-                    className="hidden size-7 dark:block"
-                    priority
-                  />
+                  <span className="cms-logo-mask size-7 bg-primary" aria-hidden />
                 </div>
                 <div className="grid flex-1 text-left text-sm leading-tight">
                   <span className="truncate font-semibold">
@@ -88,7 +80,7 @@ export function AppSidebar() {
           <SidebarGroupLabel>Platform</SidebarGroupLabel>
           <SidebarGroupContent>
             <SidebarMenu>
-              {APP_NAV_ITEMS.map((item) => {
+              {visibleNavItems.map((item) => {
                 const Icon = item.icon;
                 const isActive =
                   pathname === item.href ||

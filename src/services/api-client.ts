@@ -1,5 +1,6 @@
 import { env } from '@/lib/env';
 import { getCsrfTokenFromCookie } from '@/auth/csrf';
+import { useAuthStore } from '@/auth/store';
 import { refreshAccessToken } from '@/services/auth-service';
 
 type ApiSchema<T> = {
@@ -17,6 +18,7 @@ type RequestOptions<T> = {
 };
 
 const DEFAULT_REQUEST_TIMEOUT_MS = 8_000;
+let deactivationNotified = false;
 
 export class ApiError extends Error {
   readonly status: number;
@@ -35,6 +37,33 @@ async function parseErrorPayload(response: Response) {
     return await response.json();
   } catch {
     return null;
+  }
+}
+
+function isDeactivatedMessage(message: string): boolean {
+  const normalized = message.toLowerCase();
+  return normalized.includes('disabled by administrator')
+    || normalized.includes('session revoked')
+    || normalized.includes('account is deactivated');
+}
+
+async function handleForcedLogout() {
+  if (typeof window === 'undefined') return;
+
+  useAuthStore.getState().setAnonymous();
+
+  if (!deactivationNotified) {
+    deactivationNotified = true;
+    try {
+      const { toast } = await import('sonner');
+      toast.error('Вы отключены администратором');
+    } catch {
+      // Toast is best-effort.
+    }
+  }
+
+  if (!window.location.pathname.startsWith('/login')) {
+    window.location.replace('/login?error=deactivated_by_admin');
   }
 }
 
@@ -96,6 +125,10 @@ async function request<T>(options: RequestOptions<T>): Promise<T> {
       payload && typeof payload === 'object' && 'message' in payload
         ? String((payload as { message: unknown }).message)
         : `Request failed with status ${response.status}`;
+
+    if (response.status === 401 && isDeactivatedMessage(message)) {
+      void handleForcedLogout();
+    }
 
     throw new ApiError(response.status, message, payload);
   }

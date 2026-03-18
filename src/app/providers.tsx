@@ -5,6 +5,7 @@ import type { ReactNode } from 'react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { ThemeProvider } from 'next-themes';
 import { Toaster } from '@/components/ui/sonner';
+import { SessionHeartbeat } from '@/auth/session-heartbeat';
 
 type ProvidersProps = {
   children: ReactNode;
@@ -36,8 +37,9 @@ export function Providers({ children }: ProvidersProps) {
         enableSystem
         disableTransitionOnChange
       >
+        <SessionHeartbeat />
         {children}
-        <Toaster />
+        <Toaster position="bottom-right" />
       </ThemeProvider>
     </QueryClientProvider>
   );

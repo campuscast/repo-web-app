@@ -1,10 +1,11 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 import { toast } from 'sonner';
+import { useAuthStore } from '@/auth/store';
 import { PageHeader } from '@/components/common/page-header';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -19,8 +20,16 @@ import {
   SelectValue
 } from '@/components/ui/select';
 import { changeOwnPassword } from '@/services/user-admin-service';
+import {
+  disableMfa,
+  enableMfa,
+  getMfaStatus,
+  startMfaSetup,
+  verifyMfaCode,
+} from '@/services/mfa-service';
+import type { MfaSetup } from '@/types/api';
 
-const MIN_PASSWORD_LENGTH = 9;
+const MIN_PASSWORD_LENGTH = 8;
 
 const settingsSchema = z.object({
   workspace_name: z.string().min(2, 'Введите имя workspace'),
@@ -37,14 +46,10 @@ type SettingsForm = z.infer<typeof settingsSchema>;
 
 const passwordSchema = z
   .object({
-    current_password: z.string().min(1, 'Введите текущий пароль'),
+    current_password: z.string().optional(),
     new_password: z
       .string()
-      .min(MIN_PASSWORD_LENGTH, `Минимум ${MIN_PASSWORD_LENGTH} символов`)
-      .regex(/[A-Z]/, 'Добавьте заглавную букву')
-      .regex(/[a-z]/, 'Добавьте строчную букву')
-      .regex(/[0-9]/, 'Добавьте цифру')
-      .regex(/[^A-Za-z0-9]/, 'Добавьте спецсимвол'),
+      .min(MIN_PASSWORD_LENGTH, `Минимум ${MIN_PASSWORD_LENGTH} символов`),
     confirm_password: z.string().min(1, 'Подтвердите новый пароль')
   })
   .refine((value) => value.new_password === value.confirm_password, {
@@ -55,8 +60,19 @@ const passwordSchema = z
 type PasswordForm = z.infer<typeof passwordSchema>;
 
 export function SettingsPage() {
+  const currentUser = useAuthStore((state) => state.user);
+  const mustChangePassword = Boolean(currentUser?.must_change_password);
   const [securityMode, setSecurityMode] = useState<'standard' | 'strict'>('standard');
   const [isChangingPassword, setChangingPassword] = useState(false);
+  const [mfaStatus, setMfaStatus] = useState<{ mfa_enabled: boolean; has_secret: boolean }>({
+    mfa_enabled: false,
+    has_secret: false,
+  });
+  const [mfaSetup, setMfaSetup] = useState<MfaSetup | null>(null);
+  const [mfaCode, setMfaCode] = useState('');
+  const [mfaCodeVerified, setMfaCodeVerified] = useState(false);
+  const [mfaDisablePassword, setMfaDisablePassword] = useState('');
+  const [mfaBusy, setMfaBusy] = useState(false);
 
   const form = useForm<SettingsForm>({
     resolver: zodResolver(settingsSchema),
@@ -76,6 +92,104 @@ export function SettingsPage() {
     }
   });
 
+  useEffect(() => {
+    let active = true;
+    getMfaStatus()
+      .then((status) => {
+        if (active) {
+          setMfaStatus(status);
+        }
+      })
+      .catch(() => {
+        if (active) {
+          setMfaStatus({ mfa_enabled: false, has_secret: false });
+        }
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  const reloadMfaStatus = async () => {
+    const status = await getMfaStatus();
+    setMfaStatus(status);
+    return status;
+  };
+
+  const handleStartMfaSetup = async () => {
+    try {
+      setMfaBusy(true);
+      const setup = await startMfaSetup();
+      setMfaSetup(setup);
+      setMfaCode('');
+      setMfaCodeVerified(false);
+      toast.success('MFA setup initialized');
+      await reloadMfaStatus();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Failed to initialize MFA setup');
+    } finally {
+      setMfaBusy(false);
+    }
+  };
+
+  const handleVerifyMfaCode = async () => {
+    if (!mfaCode.trim()) {
+      toast.error('Enter authenticator code');
+      return;
+    }
+    try {
+      setMfaBusy(true);
+      await verifyMfaCode(mfaCode.trim());
+      setMfaCodeVerified(true);
+      toast.success('MFA code is valid');
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Invalid MFA code');
+    } finally {
+      setMfaBusy(false);
+    }
+  };
+
+  const handleEnableMfa = async () => {
+    if (!mfaCode.trim()) {
+      toast.error('Enter authenticator code');
+      return;
+    }
+    try {
+      setMfaBusy(true);
+      await enableMfa(mfaCode.trim());
+      setMfaSetup(null);
+      setMfaCode('');
+      setMfaCodeVerified(false);
+      await reloadMfaStatus();
+      toast.success('MFA enabled');
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Failed to enable MFA');
+    } finally {
+      setMfaBusy(false);
+    }
+  };
+
+  const handleDisableMfa = async () => {
+    if (!mfaDisablePassword) {
+      toast.error('Enter current password');
+      return;
+    }
+    try {
+      setMfaBusy(true);
+      await disableMfa(mfaDisablePassword);
+      setMfaDisablePassword('');
+      setMfaSetup(null);
+      setMfaCode('');
+      setMfaCodeVerified(false);
+      await reloadMfaStatus();
+      toast.success('MFA disabled');
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Failed to disable MFA');
+    } finally {
+      setMfaBusy(false);
+    }
+  };
+
   return (
     <div className="space-y-4">
       <PageHeader
@@ -91,10 +205,14 @@ export function SettingsPage() {
           <form
             className="space-y-4"
             onSubmit={passwordForm.handleSubmit(async (values) => {
+              if (!mustChangePassword && !values.current_password) {
+                passwordForm.setError('current_password', { message: 'Введите текущий пароль' });
+                return;
+              }
               try {
                 setChangingPassword(true);
                 await changeOwnPassword({
-                  current_password: values.current_password,
+                  current_password: mustChangePassword ? undefined : values.current_password,
                   new_password: values.new_password
                 });
                 passwordForm.reset({
@@ -111,11 +229,13 @@ export function SettingsPage() {
             })}
           >
             <div className="grid gap-4 md:grid-cols-2">
-              <div className="space-y-2">
-                <Label>Current password</Label>
-                <Input type="password" autoComplete="current-password" {...passwordForm.register('current_password')} />
-                <p className="text-xs text-destructive">{passwordForm.formState.errors.current_password?.message}</p>
-              </div>
+              {!mustChangePassword ? (
+                <div className="space-y-2">
+                  <Label>Current password</Label>
+                  <Input type="password" autoComplete="current-password" {...passwordForm.register('current_password')} />
+                  <p className="text-xs text-destructive">{passwordForm.formState.errors.current_password?.message}</p>
+                </div>
+              ) : null}
               <div className="space-y-2">
                 <Label>New password</Label>
                 <Input type="password" autoComplete="new-password" {...passwordForm.register('new_password')} />
@@ -130,13 +250,86 @@ export function SettingsPage() {
             </div>
 
             <p className="text-xs text-muted-foreground">
-              Требования: минимум {MIN_PASSWORD_LENGTH} символов, заглавная и строчная буква, цифра и спецсимвол.
+              Требования: минимум {MIN_PASSWORD_LENGTH} символов.
             </p>
 
             <Button type="submit" disabled={isChangingPassword}>
               {isChangingPassword ? 'Updating...' : 'Change password'}
             </Button>
           </form>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>MFA (TOTP)</CardTitle>
+          <CardDescription>Two-factor authentication with authenticator app</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <p className="text-sm text-muted-foreground">
+            Status: {mfaStatus.mfa_enabled ? 'Enabled' : 'Disabled'}
+          </p>
+
+          {!mfaStatus.mfa_enabled ? (
+            <div className="space-y-3">
+              <Button variant="outline" onClick={handleStartMfaSetup} disabled={mfaBusy}>
+                {mfaBusy ? 'Preparing...' : 'Initiate MFA setup'}
+              </Button>
+
+              {mfaSetup ? (
+                <div className="space-y-3 rounded-md border p-3">
+                  <div className="space-y-1">
+                    <Label>Setup secret</Label>
+                    <code className="block rounded bg-muted p-2 text-xs select-all">{mfaSetup.secret}</code>
+                  </div>
+                  <div className="space-y-1">
+                    <Label>otpauth URI (QR payload)</Label>
+                    <code className="block rounded bg-muted p-2 text-xs select-all break-all">{mfaSetup.otpauth_uri}</code>
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label>Authenticator code</Label>
+                    <Input
+                      placeholder="123456"
+                      value={mfaCode}
+                      onChange={(event) => {
+                        setMfaCode(event.target.value);
+                        setMfaCodeVerified(false);
+                      }}
+                      inputMode="numeric"
+                    />
+                  </div>
+
+                  <div className="flex flex-wrap gap-2">
+                    <Button variant="outline" onClick={handleVerifyMfaCode} disabled={mfaBusy}>
+                      Verify code
+                    </Button>
+                    <Button onClick={handleEnableMfa} disabled={mfaBusy || !mfaCodeVerified}>
+                      Enable MFA
+                    </Button>
+                  </div>
+                </div>
+              ) : null}
+            </div>
+          ) : (
+            <div className="space-y-3 rounded-md border p-3">
+              <p className="text-sm text-muted-foreground">
+                MFA is enabled. Enter password to disable.
+              </p>
+              <div className="space-y-2">
+                <Label>Current password</Label>
+                <Input
+                  type="password"
+                  value={mfaDisablePassword}
+                  onChange={(event) => setMfaDisablePassword(event.target.value)}
+                  autoComplete="current-password"
+                />
+              </div>
+              <Button variant="destructive" onClick={handleDisableMfa} disabled={mfaBusy}>
+                Disable MFA
+              </Button>
+            </div>
+          )}
         </CardContent>
       </Card>
 

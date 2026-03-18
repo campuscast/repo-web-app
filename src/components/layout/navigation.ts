@@ -16,18 +16,22 @@ export type AppNavItem = {
   href: string;
   label: string;
   icon: LucideIcon;
+  requiredPermission?: string;
+  adminOnly?: boolean;
 };
 
 export const APP_NAV_ITEMS: AppNavItem[] = [
   { href: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
-  { href: '/zones', label: 'Zones', icon: MapPinned },
-  { href: '/screen-groups', label: 'Screen Groups', icon: Tv },
-  { href: '/devices', label: 'Devices', icon: MonitorSmartphone },
-  { href: '/content', label: 'Content', icon: FileVideo2 },
-  { href: '/schedules', label: 'Schedules', icon: CalendarClock },
-  { href: '/releases', label: 'Releases', icon: Rocket },
-  { href: '/audit', label: 'Audit', icon: ScrollText },
-  { href: '/admin/users', label: 'Users', icon: Users },
+  { href: '/zones', label: 'Zones', icon: MapPinned, requiredPermission: 'zones.read' },
+  { href: '/screen-groups', label: 'Screen Groups', icon: Tv, requiredPermission: 'zones.read' },
+  { href: '/devices', label: 'Devices', icon: MonitorSmartphone, requiredPermission: 'devices.read' },
+  { href: '/content', label: 'Content', icon: FileVideo2, requiredPermission: 'content.read' },
+  { href: '/publications', label: 'Publications', icon: FileVideo2, requiredPermission: 'content.read' },
+  { href: '/schedules', label: 'Schedules', icon: CalendarClock, requiredPermission: 'schedules.read' },
+  { href: '/releases', label: 'Releases', icon: Rocket, requiredPermission: 'schedules.read' },
+  { href: '/audit', label: 'Audit', icon: ScrollText, requiredPermission: 'audit.read' },
+  { href: '/admin/users', label: 'Users', icon: Users, requiredPermission: 'users.read' },
+  { href: '/admin/roles', label: 'Roles', icon: Users, requiredPermission: 'users.read' },
   { href: '/settings', label: 'Settings', icon: Settings },
 ];
 
@@ -37,10 +41,12 @@ const PATH_TITLES: Record<string, string> = {
   '/screen-groups': 'Screen Groups',
   '/devices': 'Devices',
   '/content': 'Content',
+  '/publications': 'Publications',
   '/schedules': 'Schedules',
   '/releases': 'Releases',
   '/audit': 'Audit',
   '/admin/users': 'User Management',
+  '/admin/roles': 'Role Management',
   '/settings': 'Settings',
 };
 

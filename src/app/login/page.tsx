@@ -1,4 +1,5 @@
 import { LockKeyhole, ShieldCheck } from 'lucide-react';
+import { env } from '@/lib/env';
 import { Button } from '@/components/ui/button';
 import {
   Card,
@@ -13,7 +14,38 @@ const ERROR_MESSAGES: Record<string, string> = {
   missing_credentials: 'Enter login and password',
   invalid_credentials: 'Invalid login or password',
   invalid_response: 'Invalid auth response',
+  mfa_required: 'MFA required. Enter code on the next screen.',
+  not_initialized: 'System is not initialized yet. Run bootstrap install flow first.',
+  deactivated_by_admin: 'Your account was disabled by administrator.',
 };
+
+type InitState = {
+  initialized: boolean;
+  has_admin: boolean;
+};
+
+async function fetchInitState(): Promise<InitState | null> {
+  try {
+    const response = await fetch(`${env.backendBaseUrl}/api/v1/system/init-state`, {
+      method: 'GET',
+      cache: 'no-store',
+    });
+    if (!response.ok) return null;
+
+    const payload = await response.json();
+    if (
+      payload &&
+      typeof payload === 'object' &&
+      typeof payload.initialized === 'boolean' &&
+      typeof payload.has_admin === 'boolean'
+    ) {
+      return payload as InitState;
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
 
 export default async function LoginPage({
   searchParams,
@@ -21,9 +53,11 @@ export default async function LoginPage({
   searchParams?: Promise<Record<string, string | string[] | undefined>>;
 }) {
   const params = (await searchParams) ?? {};
+  const initState = await fetchInitState();
   const rawError = params.error;
   const errorKey = Array.isArray(rawError) ? rawError[0] : rawError;
   const errorMessage = errorKey ? ERROR_MESSAGES[errorKey] ?? 'Login failed' : null;
+  const showNotInitialized = initState ? !initState.initialized || !initState.has_admin : false;
 
   return (
     <main className="flex min-h-screen items-center justify-center bg-muted/30 p-4">
@@ -33,6 +67,12 @@ export default async function LoginPage({
           <CardDescription>Sign in to the CMS panel</CardDescription>
         </CardHeader>
         <CardContent className="space-y-6">
+          {showNotInitialized ? (
+            <p className="rounded-md border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900">
+              CMS is not initialized yet. Run `repo-infra/scripts/bootstrap.sh` with
+              `AUTH_BOOTSTRAP_ADMIN_EMAIL` and `AUTH_BOOTSTRAP_ADMIN_PASSWORD` to create the first administrator.
+            </p>
+          ) : null}
           <form
             className="space-y-4"
             method="post"

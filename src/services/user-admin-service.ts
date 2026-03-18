@@ -1,9 +1,12 @@
 import { apiClient } from '@/services/api-client';
+import { z } from 'zod';
 import {
   adminUsersListSchema,
+  adminUserDetailsSchema,
   adminUserSchema,
   rolesListSchema,
   type AdminUser,
+  type AdminUserDetails,
 } from '@/types/api';
 
 export async function listUsers(params?: {
@@ -23,18 +26,20 @@ export async function listUsers(params?: {
   return apiClient.get(`/users${query ? `?${query}` : ''}`, adminUsersListSchema);
 }
 
-export async function getUser(id: string) {
-  return apiClient.get(`/users/${id}`, adminUserSchema);
+export async function getUser(id: string): Promise<AdminUserDetails> {
+  return apiClient.get(`/users/${id}`, adminUserDetailsSchema);
 }
 
 export async function createUser(data: {
   email: string;
   name?: string;
-  password: string;
   role_ids?: string[];
   zone_ids?: string[];
 }) {
-  return apiClient.post('/users', data, adminUserSchema);
+  const createUserResponseSchema = adminUserSchema.extend({
+    temporary_password: z.string().optional(),
+  });
+  return apiClient.post('/users', data, createUserResponseSchema);
 }
 
 export async function updateUser(id: string, data: {
@@ -51,8 +56,16 @@ export async function deactivateUser(id: string) {
   return apiClient.delete(`/users/${id}`, undefined, adminUserSchema);
 }
 
+export async function restoreUser(id: string) {
+  return apiClient.post(`/users/${id}/restore`, undefined, adminUserSchema);
+}
+
+export async function deleteUserPermanently(id: string) {
+  return apiClient.delete<{ deleted: boolean }>(`/users/${id}/permanent`);
+}
+
 export async function changeOwnPassword(data: {
-  current_password: string;
+  current_password?: string;
   new_password: string;
 }) {
   return apiClient.post<{ ok: boolean; message: string }>('/users/me/change-password', data);
@@ -67,6 +80,24 @@ export async function adminResetPassword(userId: string, temporaryPassword?: str
 
 export async function listRoles() {
   return apiClient.get('/roles', rolesListSchema);
+}
+
+export async function createRole(data: {
+  name: string;
+  permissions: string[];
+}) {
+  return apiClient.post('/roles', data);
+}
+
+export async function updateRole(roleId: string, data: {
+  name?: string;
+  permissions?: string[];
+}) {
+  return apiClient.put(`/roles/${roleId}`, data);
+}
+
+export async function deleteRole(roleId: string) {
+  return apiClient.delete<{ deleted: boolean }>(`/roles/${roleId}`);
 }
 
 export async function assignRole(userId: string, roleId: string) {

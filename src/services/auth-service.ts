@@ -1,7 +1,9 @@
 import { apiClient } from '@/services/api-client';
 import {
+  loginResponseSchema,
   tokenPairSchema,
   userMeSchema,
+  type LoginResponse,
   type TokenPair,
   type UserMe
 } from '@/types/api';
@@ -27,7 +29,10 @@ export async function fetchMe(): Promise<UserMe> {
 
 export async function login(credentials: LoginCredentials): Promise<UserMe> {
   // Login via API — tokens will be set as httpOnly cookies by the server
-  await apiClient.post<TokenPair>('/auth/login', credentials, tokenPairSchema);
+  const response = await apiClient.post<LoginResponse>('/auth/login', credentials, loginResponseSchema);
+  if ('mfa_required' in response && response.mfa_required) {
+    throw new Error('MFA challenge required');
+  }
   const me = await fetchMe();
   return me;
 }

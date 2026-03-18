@@ -18,17 +18,11 @@ export const metadata: Metadata = {
   icons: {
     icon: [
       {
-        url: '/cms-icon-light.svg',
+        url: '/new-cms-logo.svg',
         type: 'image/svg+xml',
-        media: '(prefers-color-scheme: light)',
-      },
-      {
-        url: '/cms-icon-dark.svg',
-        type: 'image/svg+xml',
-        media: '(prefers-color-scheme: dark)',
       },
     ],
-    shortcut: '/cms-icon-light.svg',
+    shortcut: '/new-cms-logo.svg',
   },
 };
 

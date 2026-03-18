@@ -26,6 +26,9 @@ export const zoneService = {
   updateZone: (zoneId: string, payload: { name?: string; description?: string }) =>
     apiClient.put(`/zones/${zoneId}`, payload, zoneSchema),
 
+  deleteZone: (zoneId: string) =>
+    apiClient.delete<{ deleted: boolean }>(`/zones/${zoneId}`),
+
   getPolicy: (zoneId: string) => apiClient.get(`/zones/${zoneId}/policy`, zonePolicySchema),
 
   setPolicy: (

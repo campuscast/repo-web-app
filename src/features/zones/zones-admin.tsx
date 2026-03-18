@@ -5,7 +5,7 @@ import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { MoreHorizontal, Plus, Search } from 'lucide-react';
+import { MoreHorizontal, Plus, Search, Trash2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { useAuthStore } from '@/auth/store';
 import { hasRole } from '@/auth/guards';
@@ -14,6 +14,16 @@ import { EmptyState } from '@/components/common/empty-state';
 import { PageHeader } from '@/components/common/page-header';
 import { StatusBadge } from '@/components/common/status-badge';
 import { Button } from '@/components/ui/button';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
 import {
   Dialog,
   DialogContent,
@@ -42,8 +52,13 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { queryKeys } from '@/lib/query-keys';
 import { zoneService } from '@/services/zone-service';
 
+const MAX_ZONE_NAME_LENGTH = 40;
+
 const createZoneSchema = z.object({
-  name: z.string().min(2, 'Введите название зоны'),
+  name: z
+    .string()
+    .min(2, 'Введите название зоны')
+    .max(MAX_ZONE_NAME_LENGTH, `Maximum ${MAX_ZONE_NAME_LENGTH} characters`),
   description: z.string().max(140, 'Максимум 140 символов')
 });
 
@@ -78,6 +93,8 @@ export function ZonesAdmin() {
   const [isCreateOpen, setCreateOpen] = useState(false);
   const [isPolicyOpen, setPolicyOpen] = useState(false);
   const [policyZoneId, setPolicyZoneId] = useState('');
+  const [deleteTarget, setDeleteTarget] = useState<{ zone_id: string; name: string } | null>(null);
+  const [zoneNameLimitNotified, setZoneNameLimitNotified] = useState(false);
 
   const zoneForm = useForm<CreateZoneForm>({
     resolver: zodResolver(createZoneSchema),
@@ -165,6 +182,16 @@ export function ZonesAdmin() {
     onError: (error) => toast.error(error instanceof Error ? error.message : 'Failed to save policy')
   });
 
+  const deleteZone = useMutation({
+    mutationFn: (zoneId: string) => zoneService.deleteZone(zoneId),
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: queryKeys.zones });
+      setDeleteTarget(null);
+      toast.success('Zone deleted');
+    },
+    onError: (error) => toast.error(error instanceof Error ? error.message : 'Failed to delete zone'),
+  });
+
   const syncPolicyForm = useCallback(() => {
     const current = policyQuery.data;
     if (!current) return;
@@ -191,7 +218,16 @@ export function ZonesAdmin() {
         description="Управление зонами вещания, лимитами и CRDT-политиками"
         actions={
           isAdmin ? (
-            <Dialog open={isCreateOpen} onOpenChange={setCreateOpen}>
+            <Dialog
+              open={isCreateOpen}
+              onOpenChange={(open) => {
+                setCreateOpen(open);
+                if (!open) {
+                  zoneForm.reset();
+                  setZoneNameLimitNotified(false);
+                }
+              }}
+            >
               <DialogTrigger asChild>
                 <Button>
                   <Plus className="size-4" />
@@ -209,8 +245,27 @@ export function ZonesAdmin() {
                 >
                   <div className="space-y-2">
                     <Label htmlFor="zone-name">Name</Label>
-                    <Input id="zone-name" {...zoneForm.register('name')} />
+                    <Input
+                      id="zone-name"
+                      {...zoneForm.register('name', {
+                        onChange: (event) => {
+                          const raw = String(event?.target?.value || '');
+                          if (raw.length > MAX_ZONE_NAME_LENGTH) {
+                            event.target.value = raw.slice(0, MAX_ZONE_NAME_LENGTH);
+                            if (!zoneNameLimitNotified) {
+                              toast.error(`Zone name cannot be longer than ${MAX_ZONE_NAME_LENGTH} characters`);
+                              setZoneNameLimitNotified(true);
+                            }
+                            return;
+                          }
+                          if (zoneNameLimitNotified) {
+                            setZoneNameLimitNotified(false);
+                          }
+                        },
+                      })}
+                    />
                     <p className="text-xs text-destructive">{zoneForm.formState.errors.name?.message}</p>
+                    <p className="text-xs text-muted-foreground">Max {MAX_ZONE_NAME_LENGTH} characters.</p>
                   </div>
                   <div className="space-y-2">
                     <Label htmlFor="zone-desc">Description</Label>
@@ -303,6 +358,15 @@ export function ZonesAdmin() {
                           <DropdownMenuItem onClick={() => openPolicyDialog(zone.zone_id)}>
                             Edit policy
                           </DropdownMenuItem>
+                          {isAdmin ? (
+                            <DropdownMenuItem
+                              onClick={() => setDeleteTarget({ zone_id: zone.zone_id, name: zone.name })}
+                              className="text-destructive focus:text-destructive"
+                            >
+                              <Trash2 className="mr-2 size-4" />
+                              Delete zone
+                            </DropdownMenuItem>
+                          ) : null}
                         </DropdownMenuContent>
                       </DropdownMenu>
                     </TableCell>
@@ -368,6 +432,28 @@ export function ZonesAdmin() {
           )}
         </DialogContent>
       </Dialog>
+
+      <AlertDialog open={!!deleteTarget} onOpenChange={(open) => !open && setDeleteTarget(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete zone</AlertDialogTitle>
+            <AlertDialogDescription>
+              Are you sure you want to delete zone <strong>{deleteTarget?.name}</strong>? This action cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => {
+                if (!deleteTarget) return;
+                deleteZone.mutate(deleteTarget.zone_id);
+              }}
+            >
+              Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }
