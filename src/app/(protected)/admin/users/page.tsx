@@ -24,6 +24,7 @@ import {
 import { Label } from '@/components/ui/label';
 import { PageHeader } from '@/components/common/page-header';
 import { useAuthStore } from '@/auth/store';
+import { useLocale } from '@/hooks/use-locale';
 import {
   listUsers, getUser, createUser, updateUser, deactivateUser,
   restoreUser, deleteUserPermanently, adminResetPassword, listRoles, assignRole, removeRole,
@@ -35,6 +36,7 @@ const MAX_USER_LOGIN_LENGTH = 20;
 const MAX_USER_NAME_LENGTH = 20;
 
 export default function UsersAdminPage() {
+  const { t } = useLocale();
   const { isAdmin, hasPermission, user: currentUser } = useAuthStore();
   const canRead = isAdmin() || hasPermission('users.read');
   const canWrite = isAdmin() || hasPermission('users.write');
@@ -103,20 +105,20 @@ export default function UsersAdminPage() {
       setRoles(rolesResult.data);
       setZones(zonesResult);
     } catch (e: any) {
-      toast.error(e.message || 'Failed to load users');
+      toast.error(e.message || t('users.toast.loadFailed'));
     } finally {
       setLoading(false);
     }
-  }, [canRead, page, search]);
+  }, [canRead, page, search, t]);
 
   useEffect(() => { load(); }, [load]);
 
   if (!canRead) {
     return (
       <div className="space-y-4">
-        <PageHeader description="Manage system users, roles, and permissions" />
+        <PageHeader description={t('users.description')} />
         <p className="rounded-md border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
-          You do not have permission to view users.
+          {t('users.noPermission')}
         </p>
       </div>
     );
@@ -135,7 +137,9 @@ export default function UsersAdminPage() {
     }
 
     if (!limitNotified) {
-      toast.error(`${fieldLabel} cannot be longer than ${maxLength} characters`);
+      toast.error(
+        t('users.toast.maxLength', { field: fieldLabel, max: maxLength }),
+      );
       setLimitNotified(true);
     }
     return rawValue.slice(0, maxLength);
@@ -146,24 +150,25 @@ export default function UsersAdminPage() {
 
   const handleCreate = async () => {
     if (!createForm.email.trim()) {
-      toast.error('Login is required');
+      toast.error(t('users.toast.loginRequired'));
       return;
     }
     setCreating(true);
     try {
       const created = await createUser(createForm);
-      toast.success('User created');
+      toast.success(t('users.toast.userCreated'));
       setCreateOpen(false);
       setCreateForm({ email: '', name: '', role_ids: [], zone_ids: [] });
       setCreateLoginLimitNotified(false);
       setCreateNameLimitNotified(false);
       setCreatedCredentials({
         login: created.email,
-        temporary_password: created.temporary_password || 'not available',
+        temporary_password:
+          created.temporary_password || t('common.notAvailable'),
       });
       load();
     } catch (e: any) {
-      toast.error(e.message || 'Failed to create user');
+      toast.error(e.message || t('users.toast.userCreateFailed'));
     } finally {
       setCreating(false);
     }
@@ -172,18 +177,18 @@ export default function UsersAdminPage() {
   const handleEdit = async () => {
     if (!editUser) return;
     if (isSuperAdminUser(editUser)) {
-      toast.error('super_admin user cannot be modified in Users');
+      toast.error(t('users.toast.superAdminReadonly'));
       setEditUser(null);
       return;
     }
     setSaving(true);
     try {
       await updateUser(editUser.id, editForm);
-      toast.success('User updated');
+      toast.success(t('users.toast.userUpdated'));
       setEditUser(null);
       load();
     } catch (e: any) {
-      toast.error(e.message || 'Failed to update user');
+      toast.error(e.message || t('users.toast.userUpdateFailed'));
     } finally {
       setSaving(false);
     }
@@ -192,83 +197,83 @@ export default function UsersAdminPage() {
   const handleDeactivate = async () => {
     if (!deactivateTarget) return;
     if (isSuperAdminUser(deactivateTarget)) {
-      toast.error('super_admin user cannot be deactivated');
+      toast.error(t('users.toast.superAdminDeactivate'));
       setDeactivateTarget(null);
       return;
     }
     if (deactivateTarget.id === currentUserId) {
-      toast.error('You cannot deactivate your own account');
+      toast.error(t('users.toast.selfDeactivate'));
       setDeactivateTarget(null);
       return;
     }
     try {
       await deactivateUser(deactivateTarget.id);
-      toast.success('User deactivated');
+      toast.success(t('users.toast.userDeactivated'));
       setDeactivateTarget(null);
       load();
     } catch (e: any) {
-      toast.error(e.message || 'Failed to deactivate user');
+      toast.error(e.message || t('users.toast.userDeactivateFailed'));
     }
   };
 
   const handleRestore = async () => {
     if (!restoreTarget) return;
     if (isSuperAdminUser(restoreTarget)) {
-      toast.error('super_admin user cannot be modified in Users');
+      toast.error(t('users.toast.superAdminReadonly'));
       setRestoreTarget(null);
       return;
     }
     try {
       await restoreUser(restoreTarget.id);
-      toast.success('User restored');
+      toast.success(t('users.toast.userRestored'));
       setRestoreTarget(null);
       load();
     } catch (e: any) {
-      toast.error(e.message || 'Failed to restore user');
+      toast.error(e.message || t('users.toast.userRestoreFailed'));
     }
   };
 
   const handleDeletePermanently = async () => {
     if (!deleteTarget) return;
     if (isSuperAdminUser(deleteTarget)) {
-      toast.error('super_admin user cannot be deleted');
+      toast.error(t('users.toast.superAdminDelete'));
       setDeleteTarget(null);
       return;
     }
     if (deleteTarget.id === currentUserId) {
-      toast.error('You cannot delete your own account');
+      toast.error(t('users.toast.selfDelete'));
       setDeleteTarget(null);
       return;
     }
     try {
       await deleteUserPermanently(deleteTarget.id);
-      toast.success('User deleted permanently');
+      toast.success(t('users.toast.userDeleted'));
       setDeleteTarget(null);
       load();
     } catch (e: any) {
-      toast.error(e.message || 'Failed to delete user');
+      toast.error(e.message || t('users.toast.userDeleteFailed'));
     }
   };
 
   const handleResetPassword = async () => {
     if (!resetTarget) return;
     if (isSuperAdminUser(resetTarget)) {
-      toast.error('super_admin password can only be changed in personal profile');
+      toast.error(t('users.toast.superAdminPassword'));
       setResetTarget(null);
       return;
     }
     try {
       const result = await adminResetPassword(resetTarget.id);
       setTempPassword(result.temporary_password);
-      toast.success('Password reset');
+      toast.success(t('users.toast.passwordReset'));
     } catch (e: any) {
-      toast.error(e.message || 'Failed to reset password');
+      toast.error(e.message || t('users.toast.passwordResetFailed'));
     }
   };
 
   const openEdit = async (user: AdminUser) => {
     if (isSuperAdminUser(user)) {
-      toast.error('super_admin user cannot be modified in Users');
+      toast.error(t('users.toast.superAdminReadonly'));
       return;
     }
     setEditUser(user);
@@ -305,12 +310,12 @@ export default function UsersAdminPage() {
   return (
     <div className="space-y-6">
       <PageHeader
-        description="Manage system users, roles, and permissions"
+        description={t('users.description')}
         actions={
           canWrite ? (
             <Button onClick={() => setCreateOpen(true)} size="sm">
               <Plus className="mr-1.5 size-4" />
-              Create User
+              {t('users.createUser')}
             </Button>
           ) : null
         }
@@ -321,7 +326,7 @@ export default function UsersAdminPage() {
           <Search className="absolute left-2.5 top-2.5 size-4 text-muted-foreground" />
           <Input
             className="pl-9"
-            placeholder="Search by email or name..."
+            placeholder={t('users.searchPlaceholder')}
             value={search}
             onChange={(e) => { setSearch(e.target.value); setPage(1); }}
           />
@@ -335,11 +340,11 @@ export default function UsersAdminPage() {
         <Table>
           <TableHeader>
             <TableRow>
-              <TableHead>User</TableHead>
-              <TableHead>Roles</TableHead>
-              <TableHead>Status</TableHead>
-              <TableHead>Created</TableHead>
-              {canWrite && <TableHead className="text-right">Actions</TableHead>}
+              <TableHead>{t('users.tableUser')}</TableHead>
+              <TableHead>{t('users.tableRoles')}</TableHead>
+              <TableHead>{t('users.tableStatus')}</TableHead>
+              <TableHead>{t('users.tableCreated')}</TableHead>
+              {canWrite && <TableHead className="text-right">{t('users.tableActions')}</TableHead>}
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -365,17 +370,16 @@ export default function UsersAdminPage() {
                   <Badge variant={user.status === 'active' ? 'default' : 'destructive'}>
                     {user.status}
                   </Badge>
-                  <Badge
-                    variant={user.online ? 'default' : 'outline'}
-                    className="ml-1 text-xs"
-                  >
-                    {user.online ? 'online' : 'offline'}
-                  </Badge>
+                  <span
+                    className={`ml-2 inline-block size-2 rounded-full align-middle ${user.online ? 'bg-green-500' : 'bg-destructive'}`}
+                    title={user.online ? t('users.statusOnline') : t('users.statusOffline')}
+                    aria-label={user.online ? t('users.statusOnline') : t('users.statusOffline')}
+                  />
                   {user.must_change_password && (
-                    <Badge variant="outline" className="ml-1 text-xs">must change pwd</Badge>
+                    <Badge variant="outline" className="ml-1 text-xs">{t('users.badgeMustChangePwd')}</Badge>
                   )}
                   {isProtectedSuperAdmin && (
-                    <Badge variant="outline" className="ml-1 text-xs">protected</Badge>
+                    <Badge variant="outline" className="ml-1 text-xs">{t('users.badgeProtected')}</Badge>
                   )}
                 </TableCell>
                 <TableCell className="text-sm text-muted-foreground">
@@ -386,24 +390,24 @@ export default function UsersAdminPage() {
                     <div className="flex justify-end gap-1">
                       {!isProtectedSuperAdmin ? (
                         <>
-                          <Button variant="ghost" size="icon" onClick={() => { void openEdit(user); }} title="Edit">
+                          <Button variant="ghost" size="icon" onClick={() => { void openEdit(user); }} title={t('users.actionEdit')}>
                             <Shield className="size-4" />
                           </Button>
-                          <Button variant="ghost" size="icon" onClick={() => { setResetTarget(user); setTempPassword(null); }} title="Reset password">
+                          <Button variant="ghost" size="icon" onClick={() => { setResetTarget(user); setTempPassword(null); }} title={t('users.actionResetPassword')}>
                             <KeyRound className="size-4" />
                           </Button>
                           {user.status === 'active' && user.id !== currentUserId && (
-                            <Button variant="ghost" size="icon" onClick={() => setDeactivateTarget(user)} title="Deactivate">
+                            <Button variant="ghost" size="icon" onClick={() => setDeactivateTarget(user)} title={t('users.actionDeactivate')}>
                               <UserX className="size-4" />
                             </Button>
                           )}
                           {user.status !== 'active' && user.id !== currentUserId && (
-                            <Button variant="ghost" size="icon" onClick={() => setRestoreTarget(user)} title="Restore">
+                            <Button variant="ghost" size="icon" onClick={() => setRestoreTarget(user)} title={t('users.actionRestore')}>
                               <UserCheck className="size-4" />
                             </Button>
                           )}
                           {user.id !== currentUserId && (
-                            <Button variant="ghost" size="icon" onClick={() => setDeleteTarget(user)} title="Delete permanently">
+                            <Button variant="ghost" size="icon" onClick={() => setDeleteTarget(user)} title={t('users.actionDeletePermanent')}>
                               <Trash2 className="size-4" />
                             </Button>
                           )}
@@ -418,7 +422,7 @@ export default function UsersAdminPage() {
             {!loading && users.length === 0 && (
               <TableRow>
                 <TableCell colSpan={canWrite ? 5 : 4} className="text-center py-8 text-muted-foreground">
-                  No users found
+                  {t('users.empty')}
                 </TableCell>
               </TableRow>
             )}
@@ -429,14 +433,14 @@ export default function UsersAdminPage() {
       {total > 20 && (
         <div className="flex items-center justify-between">
           <span className="text-sm text-muted-foreground">
-            Page {page} of {Math.ceil(total / 20)}
+            {t('users.page', { page, total: Math.ceil(total / 20) })}
           </span>
           <div className="flex gap-2">
             <Button variant="outline" size="sm" disabled={page <= 1} onClick={() => setPage(p => p - 1)}>
-              Previous
+              {t('users.previous')}
             </Button>
             <Button variant="outline" size="sm" disabled={page * 20 >= total} onClick={() => setPage(p => p + 1)}>
-              Next
+              {t('users.next')}
             </Button>
           </div>
         </div>
@@ -456,18 +460,18 @@ export default function UsersAdminPage() {
       >
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Create User</DialogTitle>
+            <DialogTitle>{t('users.createUser')}</DialogTitle>
           </DialogHeader>
           <div className="space-y-4">
             <div className="space-y-1.5">
-              <Label>Login</Label>
+              <Label>{t('users.login')}</Label>
               <Input
                 value={createForm.email}
                 onChange={(e) => {
                   const next = enforceLength(
                     e.target.value,
                     MAX_USER_LOGIN_LENGTH,
-                    'Login',
+                    t('users.login'),
                     createLoginLimitNotified,
                     setCreateLoginLimitNotified,
                   );
@@ -476,14 +480,14 @@ export default function UsersAdminPage() {
               />
             </div>
             <div className="space-y-1.5">
-              <Label>Name</Label>
+              <Label>{t('users.name')}</Label>
               <Input
                 value={createForm.name}
                 onChange={(e) => {
                   const next = enforceLength(
                     e.target.value,
                     MAX_USER_NAME_LENGTH,
-                    'Name',
+                    t('users.name'),
                     createNameLimitNotified,
                     setCreateNameLimitNotified,
                   );
@@ -492,7 +496,7 @@ export default function UsersAdminPage() {
               />
             </div>
             <div className="space-y-1.5">
-              <Label>Roles</Label>
+              <Label>{t('users.roles')}</Label>
               <div className="flex flex-wrap gap-2">
                 {roles.map((role) => (
                   <Badge
@@ -507,7 +511,7 @@ export default function UsersAdminPage() {
               </div>
             </div>
             <div className="space-y-1.5">
-              <Label>Zone assignments</Label>
+              <Label>{t('users.zoneAssignments')}</Label>
               <div className="flex flex-wrap gap-2">
                 {zones.map((zone) => (
                   <Badge
@@ -523,9 +527,9 @@ export default function UsersAdminPage() {
             </div>
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setCreateOpen(false)}>Cancel</Button>
+            <Button variant="outline" onClick={() => setCreateOpen(false)}>{t('settings.cancel')}</Button>
             <Button onClick={handleCreate} disabled={creating}>
-              {creating ? 'Creating...' : 'Create'}
+              {creating ? t('users.creating') : t('users.create')}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -534,11 +538,11 @@ export default function UsersAdminPage() {
       <Dialog open={!!createdCredentials} onOpenChange={(open) => !open && setCreatedCredentials(null)}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>User created</DialogTitle>
+            <DialogTitle>{t('users.userCreated')}</DialogTitle>
           </DialogHeader>
           <div className="space-y-4">
             <div className="space-y-1.5">
-              <Label>Login</Label>
+              <Label>{t('users.login')}</Label>
               <div className="flex items-center gap-2 rounded-md border bg-muted/30 px-3 py-2">
                 <code className="flex-1 text-sm">{createdCredentials?.login}</code>
                 <Button
@@ -547,7 +551,7 @@ export default function UsersAdminPage() {
                   onClick={async () => {
                     if (!createdCredentials?.login) return;
                     await navigator.clipboard.writeText(createdCredentials.login);
-                    toast.success('Login copied');
+                    toast.success(t('users.toast.loginCopied'));
                   }}
                 >
                   <Clipboard className="size-4" />
@@ -555,7 +559,7 @@ export default function UsersAdminPage() {
               </div>
             </div>
             <div className="space-y-1.5">
-              <Label>Temporary password</Label>
+              <Label>{t('users.temporaryPassword')}</Label>
               <div className="flex items-center gap-2 rounded-md border bg-muted/30 px-3 py-2">
                 <code className="flex-1 text-sm">{createdCredentials?.temporary_password}</code>
                 <Button
@@ -564,19 +568,19 @@ export default function UsersAdminPage() {
                   onClick={async () => {
                     if (!createdCredentials?.temporary_password) return;
                     await navigator.clipboard.writeText(createdCredentials.temporary_password);
-                    toast.success('Temporary password copied');
+                    toast.success(t('users.toast.tempPasswordCopied'));
                   }}
                 >
                   <Clipboard className="size-4" />
                 </Button>
               </div>
               <p className="text-xs text-muted-foreground">
-                Save and transfer these credentials securely. The temporary password will not be shown again.
+                {t('users.saveCredentials')}
               </p>
             </div>
           </div>
           <DialogFooter>
-            <Button onClick={() => setCreatedCredentials(null)}>Done</Button>
+            <Button onClick={() => setCreatedCredentials(null)}>{t('common.done')}</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -585,18 +589,18 @@ export default function UsersAdminPage() {
       <Dialog open={!!editUser} onOpenChange={(open) => !open && setEditUser(null)}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Edit User</DialogTitle>
+            <DialogTitle>{t('users.editUser')}</DialogTitle>
           </DialogHeader>
           <div className="space-y-4">
             <div className="space-y-1.5">
-              <Label>Login</Label>
+              <Label>{t('users.login')}</Label>
               <Input
                 value={editForm.email}
                 onChange={(e) => {
                   const next = enforceLength(
                     e.target.value,
                     MAX_USER_LOGIN_LENGTH,
-                    'Login',
+                    t('users.login'),
                     editLoginLimitNotified,
                     setEditLoginLimitNotified,
                   );
@@ -605,14 +609,14 @@ export default function UsersAdminPage() {
               />
             </div>
             <div className="space-y-1.5">
-              <Label>Name</Label>
+              <Label>{t('users.name')}</Label>
               <Input
                 value={editForm.name}
                 onChange={(e) => {
                   const next = enforceLength(
                     e.target.value,
                     MAX_USER_NAME_LENGTH,
-                    'Name',
+                    t('users.name'),
                     editNameLimitNotified,
                     setEditNameLimitNotified,
                   );
@@ -621,7 +625,7 @@ export default function UsersAdminPage() {
               />
             </div>
             <div className="space-y-1.5">
-              <Label>Roles</Label>
+              <Label>{t('users.roles')}</Label>
               <div className="flex flex-wrap gap-2">
                 {roles.map((role) => (
                   <Badge
@@ -636,7 +640,7 @@ export default function UsersAdminPage() {
               </div>
             </div>
             <div className="space-y-1.5">
-              <Label>Zone assignments</Label>
+              <Label>{t('users.zoneAssignments')}</Label>
               <div className="flex flex-wrap gap-2">
                 {zones.map((zone) => (
                   <Badge
@@ -652,9 +656,9 @@ export default function UsersAdminPage() {
             </div>
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setEditUser(null)}>Cancel</Button>
+            <Button variant="outline" onClick={() => setEditUser(null)}>{t('settings.cancel')}</Button>
             <Button onClick={handleEdit} disabled={saving}>
-              {saving ? 'Saving...' : 'Save'}
+              {saving ? t('users.saving') : t('settings.save')}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -664,14 +668,14 @@ export default function UsersAdminPage() {
       <AlertDialog open={!!deactivateTarget} onOpenChange={(open) => !open && setDeactivateTarget(null)}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Deactivate User</AlertDialogTitle>
+            <AlertDialogTitle>{t('users.deactivateTitle')}</AlertDialogTitle>
             <AlertDialogDescription>
-              Are you sure you want to deactivate {deactivateTarget?.email}? They will no longer be able to log in.
+              {t('users.deactivateDescription', { email: deactivateTarget?.email ?? '-' })}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction onClick={handleDeactivate}>Deactivate</AlertDialogAction>
+            <AlertDialogCancel>{t('settings.cancel')}</AlertDialogCancel>
+            <AlertDialogAction onClick={handleDeactivate}>{t('users.actionDeactivate')}</AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
@@ -679,14 +683,14 @@ export default function UsersAdminPage() {
       <AlertDialog open={!!restoreTarget} onOpenChange={(open) => !open && setRestoreTarget(null)}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Restore User</AlertDialogTitle>
+            <AlertDialogTitle>{t('users.restoreTitle')}</AlertDialogTitle>
             <AlertDialogDescription>
-              Restore {restoreTarget?.email}? The user will be able to log in again.
+              {t('users.restoreDescription', { email: restoreTarget?.email ?? '-' })}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction onClick={handleRestore}>Restore</AlertDialogAction>
+            <AlertDialogCancel>{t('settings.cancel')}</AlertDialogCancel>
+            <AlertDialogAction onClick={handleRestore}>{t('users.actionRestore')}</AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
@@ -694,14 +698,14 @@ export default function UsersAdminPage() {
       <AlertDialog open={!!deleteTarget} onOpenChange={(open) => !open && setDeleteTarget(null)}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Delete User Permanently</AlertDialogTitle>
+            <AlertDialogTitle>{t('users.deleteTitle')}</AlertDialogTitle>
             <AlertDialogDescription>
-              Permanently delete {deleteTarget?.email}? This action cannot be undone.
+              {t('users.deleteDescription', { email: deleteTarget?.email ?? '-' })}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction onClick={handleDeletePermanently}>Delete permanently</AlertDialogAction>
+            <AlertDialogCancel>{t('settings.cancel')}</AlertDialogCancel>
+            <AlertDialogAction onClick={handleDeletePermanently}>{t('users.actionDeletePermanent')}</AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
@@ -710,32 +714,31 @@ export default function UsersAdminPage() {
       <Dialog open={!!resetTarget} onOpenChange={(open) => { if (!open) { setResetTarget(null); setTempPassword(null); } }}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Reset Password</DialogTitle>
+            <DialogTitle>{t('users.resetTitle')}</DialogTitle>
           </DialogHeader>
           {!tempPassword ? (
             <div>
               <p className="text-sm text-muted-foreground mb-4">
-                Generate a temporary password for <strong>{resetTarget?.email}</strong>.
-                The user will be required to change it on next login.
+                {t('users.resetDescription', { email: resetTarget?.email ?? '-' })}
               </p>
               <DialogFooter>
-                <Button variant="outline" onClick={() => setResetTarget(null)}>Cancel</Button>
-                <Button onClick={handleResetPassword}>Generate Password</Button>
+                <Button variant="outline" onClick={() => setResetTarget(null)}>{t('settings.cancel')}</Button>
+                <Button onClick={handleResetPassword}>{t('users.generatePassword')}</Button>
               </DialogFooter>
             </div>
           ) : (
             <div>
               <p className="text-sm text-muted-foreground mb-2">
-                Temporary password for <strong>{resetTarget?.email}</strong>:
+                {t('users.tempFor', { email: resetTarget?.email ?? '-' })}
               </p>
               <code className="block p-3 bg-muted rounded text-sm font-mono select-all">
                 {tempPassword}
               </code>
               <p className="text-xs text-muted-foreground mt-2">
-                Copy this password and share it securely. It will not be shown again.
+                {t('users.copyShare')}
               </p>
               <DialogFooter className="mt-4">
-                <Button onClick={() => { setResetTarget(null); setTempPassword(null); }}>Done</Button>
+                <Button onClick={() => { setResetTarget(null); setTempPassword(null); }}>{t('common.done')}</Button>
               </DialogFooter>
             </div>
           )}

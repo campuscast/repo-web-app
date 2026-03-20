@@ -29,9 +29,10 @@ import {
 import { useAuthStore } from '@/auth/store';
 import { logout } from '@/services/auth-service';
 import { APP_NAV_ITEMS } from '@/components/layout/navigation';
+import { useLocale } from '@/hooks/use-locale';
 
 function formatUserCaption(email?: string) {
-  if (!email || email.startsWith('unknown')) return 'Account';
+  if (!email || email.startsWith('unknown')) return null;
   return email;
 }
 
@@ -46,6 +47,7 @@ export function AppSidebar() {
   const crdtEnabled = useAuthStore((state) => state.crdtEnabled);
   const hasPermission = useAuthStore((state) => state.hasPermission);
   const isAdmin = useAuthStore((state) => state.isAdmin);
+  const { t } = useLocale();
 
   const visibleNavItems = APP_NAV_ITEMS.filter((item) => {
     if (item.adminOnly && !isAdmin()) return false;
@@ -67,7 +69,7 @@ export function AppSidebar() {
                   <span className="truncate font-semibold">
                     CampusCast CMS
                   </span>
-                  <span className="truncate text-xs">Control plane</span>
+                  <span className="truncate text-xs">{t('sidebar.controlPlane')}</span>
                 </div>
               </Link>
             </SidebarMenuButton>
@@ -77,7 +79,7 @@ export function AppSidebar() {
 
       <SidebarContent>
         <SidebarGroup>
-          <SidebarGroupLabel>Platform</SidebarGroupLabel>
+          <SidebarGroupLabel>{t('sidebar.platform')}</SidebarGroupLabel>
           <SidebarGroupContent>
             <SidebarMenu>
               {visibleNavItems.map((item) => {
@@ -85,20 +87,21 @@ export function AppSidebar() {
                 const isActive =
                   pathname === item.href ||
                   pathname.startsWith(`${item.href}/`);
+                const label = t(item.labelKey);
 
                 return (
                   <SidebarMenuItem key={item.href}>
                     <SidebarMenuButton
                       asChild
                       isActive={isActive}
-                      tooltip={item.label}
+                      tooltip={label}
                     >
                       <Link
                         href={item.href}
                         onClick={() => setOpenMobile(false)}
                       >
                         <Icon />
-                        <span>{item.label}</span>
+                        <span>{label}</span>
                       </Link>
                     </SidebarMenuButton>
                   </SidebarMenuItem>
@@ -125,10 +128,10 @@ export function AppSidebar() {
                     <span className="truncate font-medium">
                       {user?.name && user.name !== 'unknown'
                         ? user.name
-                        : 'CampusCast user'}
+                        : t('sidebar.userDefault')}
                     </span>
                     <span className="truncate text-xs">
-                      {formatUserCaption(user?.email)}
+                      {formatUserCaption(user?.email) ?? t('common.account')}
                     </span>
                   </div>
                   <ChevronsUpDown className="ml-auto size-4" />
@@ -144,14 +147,14 @@ export function AppSidebar() {
                   <div className="text-sm font-medium">
                     {user?.name && user.name !== 'unknown'
                       ? user.name
-                      : 'CampusCast user'}
+                      : t('sidebar.userDefault')}
                   </div>
                   <div className="text-xs font-normal text-muted-foreground">
-                    {formatUserCaption(user?.email)}
+                    {formatUserCaption(user?.email) ?? t('common.account')}
                   </div>
                   {user?.id ? (
                     <div className="text-[11px] font-normal text-muted-foreground">
-                      ID: {user.id}
+                      {t('sidebar.userId', { id: user.id })}
                     </div>
                   ) : null}
                 </DropdownMenuLabel>
@@ -159,7 +162,7 @@ export function AppSidebar() {
 
                 <div className="px-2 pb-2">
                   <div className="mb-1 text-[11px] text-muted-foreground">
-                    Roles
+                    {t('sidebar.roles')}
                   </div>
                   <div className="flex flex-wrap gap-1">
                     {roles.length ? (
@@ -169,14 +172,14 @@ export function AppSidebar() {
                         </Badge>
                       ))
                     ) : (
-                      <Badge variant="outline">No roles</Badge>
+                      <Badge variant="outline">{t('common.noRoles')}</Badge>
                     )}
                   </div>
                 </div>
 
                 <div className="px-2 pb-2">
                   <div className="mb-1 text-[11px] text-muted-foreground">
-                    Zones
+                    {t('sidebar.zones')}
                   </div>
                   <div className="flex max-h-20 flex-wrap gap-1 overflow-auto">
                     {zones.length ? (
@@ -186,14 +189,16 @@ export function AppSidebar() {
                         </Badge>
                       ))
                     ) : (
-                      <Badge variant="outline">No zones</Badge>
+                      <Badge variant="outline">{t('common.noZones')}</Badge>
                     )}
                   </div>
                 </div>
 
                 <div className="px-2 pb-2">
                   <Badge variant={crdtEnabled ? 'default' : 'outline'}>
-                    CRDT {crdtEnabled ? 'enabled' : 'disabled'}
+                    {t('sidebar.crdt', {
+                      state: crdtEnabled ? t('common.enabled') : t('common.disabled'),
+                    })}
                   </Badge>
                 </div>
 
@@ -204,7 +209,7 @@ export function AppSidebar() {
                     className="flex cursor-pointer items-center gap-2"
                   >
                     <Settings className="size-4" />
-                    System settings
+                    {t('sidebar.systemSettings')}
                   </Link>
                 </DropdownMenuItem>
                 <DropdownMenuItem
@@ -216,7 +221,7 @@ export function AppSidebar() {
                   }}
                 >
                   <LogOut className="size-4" />
-                  Sign out
+                  {t('sidebar.signOut')}
                 </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>

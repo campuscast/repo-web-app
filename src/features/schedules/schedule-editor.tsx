@@ -15,7 +15,7 @@ import {
   startOfDay,
   startOfWeek
 } from 'date-fns';
-import { ru } from 'date-fns/locale';
+import { enUS, ru } from 'date-fns/locale';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { CalendarRange, ChevronLeft, ChevronRight, RefreshCw } from 'lucide-react';
 import { useRouter } from 'next/navigation';
@@ -27,6 +27,7 @@ import { getAccessToken } from '@/auth/token-store';
 import { useCrdtStore } from '@/features/schedules/crdt-store';
 import { useNetworkStatus } from '@/hooks/use-network-status';
 import { useCrdtQueue } from '@/hooks/use-crdt-queue';
+import { useLocale } from '@/hooks/use-locale';
 import { env } from '@/lib/env';
 import { queryKeys } from '@/lib/query-keys';
 import { EmptyState } from '@/components/common/empty-state';
@@ -110,7 +111,7 @@ const PIXELS_PER_MINUTE = 0.9;
 const TIMELINE_WIDTH = MINUTES_IN_DAY * PIXELS_PER_MINUTE;
 
 const createScheduleSchema = z.object({
-  name: z.string().min(2, 'Название расписания обязательно')
+  name: z.string().min(2)
 });
 
 function inferSignatureFailure(issues: ValidationIssue[] = []) {
@@ -147,8 +148,10 @@ function datetimeLocal(iso: string): string {
 }
 
 export function ScheduleEditor({ scheduleId }: ScheduleEditorProps) {
+  const { t, locale } = useLocale();
   const queryClient = useQueryClient();
   const router = useRouter();
+  const dateLocale = locale === 'ru' ? ru : enUS;
 
   const [selectedZoneId, setSelectedZoneId] = useState('');
   const [slotForm, setSlotForm] = useState<LocalSlotForm>(EMPTY_SLOT_FORM);
@@ -455,11 +458,11 @@ export function ScheduleEditor({ scheduleId }: ScheduleEditorProps) {
     mutationFn: async () => {
       const parsed = createScheduleSchema.safeParse({ name: newScheduleName.trim() });
       if (!parsed.success) {
-        throw new Error(parsed.error.issues[0]?.message ?? 'Invalid schedule name');
+        throw new Error(t('schedules.toast.invalidName'));
       }
 
       if (!effectiveZoneId) {
-        throw new Error('Select zone first');
+        throw new Error(t('schedules.toast.selectZone'));
       }
 
       return scheduleService.createSchedule({ zone_id: effectiveZoneId, name: parsed.data.name });
@@ -467,86 +470,95 @@ export function ScheduleEditor({ scheduleId }: ScheduleEditorProps) {
     onSuccess: async (schedule) => {
       setNewScheduleName('');
       await queryClient.invalidateQueries({ queryKey: queryKeys.schedules(effectiveZoneId) });
-      toast.success('Schedule created');
+      toast.success(t('schedules.toast.created'));
       router.push(`/schedules/${schedule.schedule_id}`);
     },
-    onError: (error) => toast.error(error instanceof Error ? error.message : 'Failed to create schedule')
+    onError: (error) =>
+      toast.error(
+        error instanceof Error ? error.message : t('schedules.toast.createFailed'),
+      ),
   });
 
   const lockMutation = useMutation({
     mutationFn: () => {
-      if (!activeSchedule) throw new Error('Select schedule first');
+      if (!activeSchedule) throw new Error(t('schedule.editor.schedule'));
       return scheduleService.lock(activeSchedule.schedule_id);
     },
     onSuccess: (result) => {
       if (!result.acquired || !result.lock_token) {
-        toast.error('Lock not acquired');
+        toast.error(t('schedule.editor.lockNotAcquired'));
         return;
       }
 
       setLockToken(result.lock_token);
       setLockOwner(result.locked_by || 'unknown');
       setLockExpiresAt(result.expires_at || '');
-      toast.success('Lock acquired');
+      toast.success(t('schedule.editor.lockAcquired'));
     },
-    onError: (error) => toast.error(error instanceof Error ? error.message : 'Lock failed')
+    onError: (error) =>
+      toast.error(error instanceof Error ? error.message : t('schedule.editor.lock')),
   });
 
   const unlockMutation = useMutation({
     mutationFn: () => {
-      if (!activeSchedule || !lockToken) throw new Error('No lock token');
+      if (!activeSchedule || !lockToken) throw new Error(t('schedule.editor.lock'));
       return scheduleService.unlock(activeSchedule.schedule_id, lockToken);
     },
     onSuccess: () => {
       setLockToken('');
       setLockOwner('');
       setLockExpiresAt('');
-      toast.success('Lock released');
+      toast.success(t('schedule.editor.unlock'));
     },
-    onError: (error) => toast.error(error instanceof Error ? error.message : 'Unlock failed')
+    onError: (error) =>
+      toast.error(error instanceof Error ? error.message : t('schedule.editor.unlock')),
   });
 
   const saveMutation = useMutation({
     mutationFn: () => {
-      if (!activeSchedule || !lockToken) throw new Error('Acquire lock before save');
+      if (!activeSchedule || !lockToken) throw new Error(t('schedule.editor.lock'));
       return scheduleService.saveDraft(activeSchedule.schedule_id, localSlots, lockToken);
     },
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: queryKeys.schedules(effectiveZoneId) });
-      toast.success('Draft saved');
+      toast.success(t('schedule.editor.saveDraft'));
     },
-    onError: (error) => toast.error(error instanceof Error ? error.message : 'Save failed')
+    onError: (error) =>
+      toast.error(error instanceof Error ? error.message : t('schedule.editor.saveDraft')),
   });
 
   const validateMutation = useMutation({
     mutationFn: () => {
-      if (!activeSchedule) throw new Error('No schedule selected');
+      if (!activeSchedule) throw new Error(t('schedule.editor.schedule'));
       return scheduleService.validate(activeSchedule.schedule_id);
     },
     onSuccess: (result) => {
       setQaIssues(result.issues);
       setLastValidationAt(new Date().toISOString());
       if (!result.issues.length) {
-        toast.success('No QA issues found');
+        toast.success(t('schedule.editor.qaNoIssues'));
       }
     },
-    onError: (error) => toast.error(error instanceof Error ? error.message : 'Validation failed')
+    onError: (error) =>
+      toast.error(
+        error instanceof Error ? error.message : t('schedule.editor.qaValidate'),
+      ),
   });
 
   const publishMutation = useMutation({
     mutationFn: async () => {
-      if (!activeSchedule) throw new Error('No schedule selected');
+      if (!activeSchedule) throw new Error(t('schedule.editor.schedule'));
 
       const validation = await scheduleService.validate(activeSchedule.schedule_id);
       setQaIssues(validation.issues);
 
       if (!validation.valid || validation.has_fatal || inferSignatureFailure(validation.issues)) {
-        throw new Error('Publish aborted: QA/signature checks failed');
+        throw new Error(t('schedule.editor.qaIssues'));
       }
 
       const result = await scheduleService.publish(activeSchedule.schedule_id, activeSchedule.current_version, []);
       if (!result.validation_passed || inferSignatureFailure(result.issues)) {
-        throw new Error('Publish rejected by signature/QA checks');
+        throw new Error(t('schedule.editor.qaIssues'));
       }
 
       return result;
@@ -558,17 +570,17 @@ export function ScheduleEditor({ scheduleId }: ScheduleEditorProps) {
       });
       setQaIssues(result.issues ?? []);
       setLastPublishAt(new Date().toISOString());
-      toast.success('Release accepted');
+      toast.success(t('schedule.editor.lastRelease'));
     },
     onError: (error) => {
       setReleaseInfo(null);
-      toast.error(error instanceof Error ? error.message : 'Publish failed');
+      toast.error(error instanceof Error ? error.message : t('schedule.editor.publish'));
     }
   });
 
   const opsBatchMutation = useMutation({
     mutationFn: async () => {
-      if (!activeSchedule) throw new Error('No schedule selected');
+      if (!activeSchedule) throw new Error(t('schedule.editor.schedule'));
       if (!pending.length) return null;
       const signedOps = await signPendingOps();
       if (!signedOps.length) return null;
@@ -598,10 +610,11 @@ export function ScheduleEditor({ scheduleId }: ScheduleEditorProps) {
       }
 
       if (result.rejected > 0) {
-        toast.error(`Rejected operations: ${result.rejected}`);
+        toast.error(`${t('schedule.editor.rejected')}: ${result.rejected}`);
       }
     },
-    onError: (error) => toast.error(error instanceof Error ? error.message : 'Sync batch failed')
+    onError: (error) =>
+      toast.error(error instanceof Error ? error.message : t('schedule.editor.syncBatch')),
   });
 
   const emitCrdtOp = useCallback(
@@ -808,14 +821,17 @@ export function ScheduleEditor({ scheduleId }: ScheduleEditorProps) {
   }, [activeSchedule, crdtEnabled, isOnline, opsBatchMutation.mutateAsync, pending, signPendingOps, syncStatus]);
 
   const lockTtl = lockExpiresAt
-    ? formatDistanceToNowStrict(new Date(lockExpiresAt), { addSuffix: true, locale: ru })
+    ? formatDistanceToNowStrict(new Date(lockExpiresAt), {
+        addSuffix: true,
+        locale: dateLocale,
+      })
     : '—';
 
   const hourMarks = useMemo(() => Array.from({ length: 25 }, (_, index) => index), []);
 
   const requestResync = useCallback(() => {
     if (!activeSchedule || !wsRef.current || syncStatus !== 'online') {
-      toast.error('Realtime sync is offline');
+      toast.error(t('schedule.editor.sync'));
       return;
     }
     try {
@@ -824,20 +840,20 @@ export function ScheduleEditor({ scheduleId }: ScheduleEditorProps) {
       wsRef.current.requestSync(activeSchedule.schedule_id, lastKnownOpIdRef.current);
     } catch (error) {
       isSyncingRef.current = false;
-      toast.error(error instanceof Error ? error.message : 'Resync request failed');
+      toast.error(error instanceof Error ? error.message : t('schedule.editor.resyncButton'));
     }
-  }, [activeSchedule, syncStatus]);
+  }, [activeSchedule, syncStatus, t]);
 
   const addSlot = async () => {
     if (!activeSchedule || (!slotForm.asset_id && !slotForm.publication_id) || !slotForm.start_time || !slotForm.end_time) {
-      toast.error('Provide asset_id or publication_id and fill time fields');
+      toast.error(t('schedule.editor.addSlot'));
       return;
     }
 
     const start = new Date(slotForm.start_time);
     const end = new Date(slotForm.end_time);
     if (!isBefore(start, end)) {
-      toast.error('End time must be after start time');
+      toast.error(t('schedule.editor.timeRange'));
       return;
     }
 
@@ -875,7 +891,7 @@ export function ScheduleEditor({ scheduleId }: ScheduleEditorProps) {
     const nextStart = parseISO(next.start_time);
     const nextEnd = parseISO(next.end_time);
     if (!isBefore(nextStart, nextEnd)) {
-      toast.error('Slot end must be after start');
+      toast.error(t('schedule.editor.timeRange'));
       return;
     }
     await updateLocalSlot(next, opType);
@@ -893,7 +909,7 @@ export function ScheduleEditor({ scheduleId }: ScheduleEditorProps) {
     const start = parseISO(selectedSlot.start_time);
     const nextEnd = addMinutes(parseISO(selectedSlot.end_time), minutes);
     if (!isBefore(start, nextEnd)) {
-      toast.error('Slot duration must stay positive');
+      toast.error(t('schedule.editor.priority'));
       return;
     }
     await saveSelectedSlot({ end_time: nextEnd.toISOString() }, 'update_slot');
@@ -902,13 +918,13 @@ export function ScheduleEditor({ scheduleId }: ScheduleEditorProps) {
   const saveSelectedSlotDraft = async () => {
     if (!selectedSlot) return;
     if ((!slotDraft.asset_id && !slotDraft.publication_id) || !slotDraft.start_time || !slotDraft.end_time) {
-      toast.error('Provide asset_id or publication_id and fill time fields');
+      toast.error(t('schedule.editor.addSlot'));
       return;
     }
     const nextStart = new Date(slotDraft.start_time);
     const nextEnd = new Date(slotDraft.end_time);
     if (!isBefore(nextStart, nextEnd)) {
-      toast.error('Slot end must be after start');
+      toast.error(t('schedule.editor.timeRange'));
       return;
     }
 
@@ -939,34 +955,38 @@ export function ScheduleEditor({ scheduleId }: ScheduleEditorProps) {
   return (
     <div className="space-y-4">
       <PageHeader
-        description={activeSchedule ? `${activeSchedule.name} — CRDT/lock editor` : 'Редактор расписания в lock/save или CRDT sync режиме'}
+        description={
+          activeSchedule
+            ? t('schedule.editor.description', { name: activeSchedule.name })
+            : t('schedule.editor.descriptionFallback')
+        }
         actions={
           <div className="flex flex-wrap gap-2">
             {crdtEnabled ? (
               <>
                 <Button variant="outline" disabled={!pending.length} onClick={() => opsBatchMutation.mutate()}>
-                  Sync batch
+                  {t('schedule.editor.syncBatch')}
                 </Button>
                 <Button variant="outline" onClick={() => validateMutation.mutate()}>
-                  QA validate
+                  {t('schedule.editor.qaValidate')}
                 </Button>
                 <Button onClick={() => publishMutation.mutate()}>
-                  Publish
+                  {t('schedule.editor.publish')}
                 </Button>
               </>
             ) : (
               <>
                 <Button variant="outline" onClick={() => lockMutation.mutate()} disabled={lockMutation.isPending}>
-                  Lock
+                  {t('schedule.editor.lock')}
                 </Button>
                 <Button variant="outline" onClick={() => saveMutation.mutate()} disabled={!lockToken || saveMutation.isPending}>
-                  Save draft
+                  {t('schedule.editor.saveDraft')}
                 </Button>
                 <Button onClick={() => publishMutation.mutate()} disabled={!lockToken || publishMutation.isPending}>
-                  Publish
+                  {t('schedule.editor.publish')}
                 </Button>
                 <Button variant="ghost" onClick={() => unlockMutation.mutate()} disabled={!lockToken || unlockMutation.isPending}>
-                  Unlock
+                  {t('schedule.editor.unlock')}
                 </Button>
               </>
             )}
@@ -976,15 +996,15 @@ export function ScheduleEditor({ scheduleId }: ScheduleEditorProps) {
 
       <Card>
         <CardHeader>
-          <CardTitle>Context</CardTitle>
-          <CardDescription>Выберите зону и целевое расписание для редактирования</CardDescription>
+          <CardTitle>{t('schedule.editor.context')}</CardTitle>
+          <CardDescription>{t('schedule.editor.contextDesc')}</CardDescription>
         </CardHeader>
         <CardContent className="grid gap-3 md:grid-cols-3">
           <div className="space-y-2">
-            <Label>Zone</Label>
+            <Label>{t('schedule.editor.zone')}</Label>
             <Select value={effectiveZoneId} onValueChange={setSelectedZoneId}>
               <SelectTrigger>
-                <SelectValue placeholder="Select zone" />
+                <SelectValue placeholder={t('schedules.selectZone')} />
               </SelectTrigger>
               <SelectContent>
                 {visibleZones.map((zone) => (
@@ -997,7 +1017,7 @@ export function ScheduleEditor({ scheduleId }: ScheduleEditorProps) {
           </div>
 
           <div className="space-y-2">
-            <Label>Schedule</Label>
+            <Label>{t('schedule.editor.schedule')}</Label>
             <Select
               value={activeSchedule?.schedule_id ?? ''}
               onValueChange={(value) => {
@@ -1013,7 +1033,7 @@ export function ScheduleEditor({ scheduleId }: ScheduleEditorProps) {
               }}
             >
               <SelectTrigger>
-                <SelectValue placeholder="Select schedule" />
+                <SelectValue placeholder={t('schedule.editor.schedule')} />
               </SelectTrigger>
               <SelectContent>
                 {(schedulesQuery.data ?? []).map((schedule) => (
@@ -1026,11 +1046,15 @@ export function ScheduleEditor({ scheduleId }: ScheduleEditorProps) {
           </div>
 
           <div className="space-y-2">
-            <Label>New schedule</Label>
+            <Label>{t('schedule.editor.newSchedule')}</Label>
             <div className="flex gap-2">
-              <Input value={newScheduleName} onChange={(event) => setNewScheduleName(event.target.value)} placeholder="Morning loop" />
+              <Input
+                value={newScheduleName}
+                onChange={(event) => setNewScheduleName(event.target.value)}
+                placeholder={t('schedule.editor.newSchedulePlaceholder')}
+              />
               <Button onClick={() => createScheduleMutation.mutate()} disabled={createScheduleMutation.isPending}>
-                Create
+                {t('common.create')}
               </Button>
             </div>
           </div>
@@ -1040,15 +1064,17 @@ export function ScheduleEditor({ scheduleId }: ScheduleEditorProps) {
               <Skeleton className="h-8 w-full" />
             ) : (
               <div className="flex flex-wrap items-center gap-2">
-                <Badge variant="outline">Mode: {crdtEnabled ? 'CRDT ON' : 'CRDT OFF'}</Badge>
-                <Badge variant={isOnline ? 'default' : 'destructive'}>Network: {isOnline ? 'online' : 'offline'}</Badge>
-                <Badge variant={syncStatus === 'online' ? 'default' : 'secondary'}>Sync: {syncStatus}</Badge>
-                <Badge variant={resyncStatus === 'requesting' ? 'secondary' : 'outline'}>Resync: {resyncStatus}</Badge>
-                <Badge variant={pending.length ? 'secondary' : 'default'}>Pending ops: {pending.length}</Badge>
-                <Badge variant={selectedSlot ? 'outline' : 'secondary'}>
-                  Selected slot: {selectedSlot ? selectedSlot.slot_id.slice(0, 8) : 'none'}
+                <Badge variant="outline">
+                  {t('schedule.editor.mode')}: {crdtEnabled ? `${t('sidebar.crdt', { state: t('common.enabled') })}` : `${t('sidebar.crdt', { state: t('common.disabled') })}`}
                 </Badge>
-                {!crdtEnabled ? <Badge variant={lockToken ? 'default' : 'secondary'}>Lock: {lockToken ? 'acquired' : 'not acquired'}</Badge> : null}
+                <Badge variant={isOnline ? 'default' : 'destructive'}>{t('schedule.editor.network')}: {isOnline ? t('users.statusOnline') : t('users.statusOffline')}</Badge>
+                <Badge variant={syncStatus === 'online' ? 'default' : 'secondary'}>{t('schedule.editor.sync')}: {syncStatus}</Badge>
+                <Badge variant={resyncStatus === 'requesting' ? 'secondary' : 'outline'}>{t('schedule.editor.resync')}: {resyncStatus}</Badge>
+                <Badge variant={pending.length ? 'secondary' : 'default'}>{t('schedule.editor.pendingOps')}: {pending.length}</Badge>
+                <Badge variant={selectedSlot ? 'outline' : 'secondary'}>
+                  {t('schedule.editor.selectedSlot')}: {selectedSlot ? selectedSlot.slot_id.slice(0, 8) : t('schedule.editor.none')}
+                </Badge>
+                {!crdtEnabled ? <Badge variant={lockToken ? 'default' : 'secondary'}>{t('schedule.editor.lockState')}: {lockToken ? t('schedule.editor.lockAcquired') : t('schedule.editor.lockNotAcquired')}</Badge> : null}
               </div>
             )}
           </div>
@@ -1057,32 +1083,31 @@ export function ScheduleEditor({ scheduleId }: ScheduleEditorProps) {
 
       {!activeSchedule && !schedulesQuery.isLoading ? (
         <EmptyState
-          title="No schedules in this zone"
-          description="Создайте первое расписание для выбранной зоны и продолжите редактирование."
+          title={t('schedule.editor.emptyTitle')}
+          description={t('schedule.editor.emptyDescription')}
         />
       ) : null}
 
       {activeSchedule ? (
         <Tabs defaultValue="timeline" className="space-y-4">
           <TabsList>
-            <TabsTrigger value="timeline">Timeline</TabsTrigger>
-            <TabsTrigger value="inspector">Inspector</TabsTrigger>
-            <TabsTrigger value="sync">Sync events</TabsTrigger>
+            <TabsTrigger value="timeline">{t('schedule.editor.tabTimeline')}</TabsTrigger>
+            <TabsTrigger value="inspector">{t('schedule.editor.tabInspector')}</TabsTrigger>
+            <TabsTrigger value="sync">{t('schedule.editor.tabSync')}</TabsTrigger>
           </TabsList>
 
           <TabsContent value="timeline" className="space-y-4">
             <Alert>
-              <AlertTitle>Operator scope</AlertTitle>
+              <AlertTitle>{t('schedule.editor.scopeTitle')}</AlertTitle>
               <AlertDescription>
-                Select schedule, switch day/week, edit zone timelines, create/edit/move/resize/delete slots, watch sync state,
-                and trigger validate/publish.
+                {t('schedule.editor.scopeDescription')}
               </AlertDescription>
             </Alert>
 
             <Card>
               <CardHeader>
-                <CardTitle>Add slot</CardTitle>
-                <CardDescription>Slot creation uses the existing lock-save or CRDT queue path (no parallel edit flow).</CardDescription>
+                <CardTitle>{t('schedule.editor.addSlot')}</CardTitle>
+                <CardDescription>{t('schedule.editor.addSlotDesc')}</CardDescription>
               </CardHeader>
               <CardContent className="grid gap-3 md:grid-cols-7">
                 <Input
@@ -1120,7 +1145,7 @@ export function ScheduleEditor({ scheduleId }: ScheduleEditorProps) {
                   onValueChange={(value) => setSlotForm((prev) => ({ ...prev, zone_id: value }))}
                 >
                   <SelectTrigger>
-                    <SelectValue placeholder="Zone" />
+                    <SelectValue placeholder={t('schedule.editor.zone')} />
                   </SelectTrigger>
                   <SelectContent>
                     {timelineZones.map((zone) => (
@@ -1132,24 +1157,24 @@ export function ScheduleEditor({ scheduleId }: ScheduleEditorProps) {
                 </Select>
 
                 <div className="md:col-span-7">
-                  <Button onClick={addSlot}>Create slot</Button>
+                  <Button onClick={addSlot}>{t('schedule.editor.createSlot')}</Button>
                 </div>
               </CardContent>
             </Card>
 
             <Card>
               <CardHeader>
-                <CardTitle>Zone timeline</CardTitle>
-                <CardDescription>Day/week timeline with real time grid and zone lanes. Click a slot to edit it in inspector.</CardDescription>
+                <CardTitle>{t('schedule.editor.zoneTimeline')}</CardTitle>
+                <CardDescription>{t('schedule.editor.zoneTimelineDesc')}</CardDescription>
               </CardHeader>
               <CardContent className="space-y-4">
                 <div className="flex flex-wrap items-center gap-2">
                   <div className="inline-flex rounded-md border p-1">
                     <Button size="sm" variant={viewMode === 'day' ? 'default' : 'ghost'} onClick={() => setViewMode('day')}>
-                      Day
+                      {t('schedule.editor.day')}
                     </Button>
                     <Button size="sm" variant={viewMode === 'week' ? 'default' : 'ghost'} onClick={() => setViewMode('week')}>
-                      Week
+                      {t('schedule.editor.week')}
                     </Button>
                   </div>
                   <Button
@@ -1175,7 +1200,7 @@ export function ScheduleEditor({ scheduleId }: ScheduleEditorProps) {
                   {crdtEnabled ? (
                     <Button variant="outline" onClick={requestResync} disabled={syncStatus !== 'online'}>
                       <RefreshCw className={`size-4 ${resyncStatus === 'requesting' ? 'animate-spin' : ''}`} />
-                      Resync
+                      {t('schedule.editor.resyncButton')}
                     </Button>
                   ) : null}
                 </div>
@@ -1187,7 +1212,7 @@ export function ScheduleEditor({ scheduleId }: ScheduleEditorProps) {
                       <div key={dayKey} className="space-y-2">
                         <div className="flex items-center gap-2 text-sm font-medium">
                           <CalendarRange className="size-4 text-muted-foreground" />
-                          {format(day, viewMode === 'day' ? 'EEEE, dd MMM yyyy' : 'EEE, dd MMM', { locale: ru })}
+                          {format(day, viewMode === 'day' ? 'EEEE, dd MMM yyyy' : 'EEE, dd MMM', { locale: dateLocale })}
                         </div>
 
                         {timelineZones.map((zone) => {
@@ -1259,19 +1284,19 @@ export function ScheduleEditor({ scheduleId }: ScheduleEditorProps) {
 
             <Card>
               <CardHeader>
-                <CardTitle>Slots table</CardTitle>
-                <CardDescription>Quick edit actions for demo scenarios.</CardDescription>
+                <CardTitle>{t('schedule.editor.slotTable')}</CardTitle>
+                <CardDescription>{t('schedule.editor.slotTableDesc')}</CardDescription>
               </CardHeader>
               <CardContent>
                 <Table>
                   <TableHeader>
                     <TableRow>
-                      <TableHead>Slot ID</TableHead>
-                      <TableHead>Content Ref</TableHead>
-                      <TableHead>Zone</TableHead>
-                      <TableHead>Time range</TableHead>
-                      <TableHead>Priority</TableHead>
-                      <TableHead className="text-right">Actions</TableHead>
+                      <TableHead>{t('schedule.editor.slotId')}</TableHead>
+                      <TableHead>{t('schedule.editor.contentRef')}</TableHead>
+                      <TableHead>{t('schedule.editor.zone')}</TableHead>
+                      <TableHead>{t('schedule.editor.timeRange')}</TableHead>
+                      <TableHead>{t('schedule.editor.priority')}</TableHead>
+                      <TableHead className="text-right">{t('users.tableActions')}</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -1287,7 +1312,7 @@ export function ScheduleEditor({ scheduleId }: ScheduleEditorProps) {
                         <TableCell className="text-right">
                           <div className="inline-flex flex-wrap justify-end gap-1">
                             <Button size="sm" variant="outline" onClick={() => setSelectedSlotId(slot.slot_id)}>
-                              Edit
+                              {t('schedule.editor.edit')}
                             </Button>
                             <Button
                               size="sm"
@@ -1318,7 +1343,7 @@ export function ScheduleEditor({ scheduleId }: ScheduleEditorProps) {
                               +15m
                             </Button>
                             <Button size="sm" variant="ghost" onClick={() => void removeLocalSlot(slot)}>
-                              Delete
+                              {t('schedule.editor.delete')}
                             </Button>
                           </div>
                         </TableCell>
@@ -1333,30 +1358,30 @@ export function ScheduleEditor({ scheduleId }: ScheduleEditorProps) {
           <TabsContent value="inspector" className="space-y-4">
             <Card>
               <CardHeader>
-                <CardTitle>Validate / publish status</CardTitle>
-                <CardDescription>Validation and release controls with immediate status feedback.</CardDescription>
+                <CardTitle>{t('schedule.editor.validateTitle')}</CardTitle>
+                <CardDescription>{t('schedule.editor.validateDesc')}</CardDescription>
               </CardHeader>
               <CardContent className="space-y-3 text-sm">
                 <div className="grid gap-3 sm:grid-cols-3">
-                  <InfoLine label="Lock owner" value={lockOwner || '—'} />
-                  <InfoLine label="Lock TTL" value={lockTtl} />
-                  <InfoLine label="Schedule version" value={String(activeSchedule.current_version)} />
+                  <InfoLine label={t('schedule.editor.lockOwner')} value={lockOwner || '—'} />
+                  <InfoLine label={t('schedule.editor.lockTtl')} value={lockTtl} />
+                  <InfoLine label={t('schedule.editor.scheduleVersion')} value={String(activeSchedule.current_version)} />
                 </div>
                 <div className="grid gap-3 sm:grid-cols-3">
-                  <InfoLine label="Last validate" value={lastValidationAt ? new Date(lastValidationAt).toLocaleString() : '—'} />
-                  <InfoLine label="Last publish" value={lastPublishAt ? new Date(lastPublishAt).toLocaleString() : '—'} />
-                  <InfoLine label="Last resync" value={lastResyncAt ? new Date(lastResyncAt).toLocaleString() : '—'} />
+                  <InfoLine label={t('schedule.editor.lastValidate')} value={lastValidationAt ? new Date(lastValidationAt).toLocaleString() : '—'} />
+                  <InfoLine label={t('schedule.editor.lastPublish')} value={lastPublishAt ? new Date(lastPublishAt).toLocaleString() : '—'} />
+                  <InfoLine label={t('schedule.editor.lastResync')} value={lastResyncAt ? new Date(lastResyncAt).toLocaleString() : '—'} />
                 </div>
                 <div className="flex flex-wrap gap-2">
                   <Button variant="outline" onClick={() => validateMutation.mutate()} disabled={validateMutation.isPending}>
-                    QA validate
+                    {t('schedule.editor.qaValidate')}
                   </Button>
                   <Button onClick={() => publishMutation.mutate()} disabled={publishMutation.isPending || (!crdtEnabled && !lockToken)}>
-                    Publish release
+                    {t('schedule.editor.publishRelease')}
                   </Button>
                   {releaseInfo ? (
                     <Button variant="outline" asChild>
-                      <Link href="/audit">Open audit log</Link>
+                      <Link href="/audit">{t('schedule.editor.openAudit')}</Link>
                     </Button>
                   ) : null}
                 </div>
@@ -1364,22 +1389,24 @@ export function ScheduleEditor({ scheduleId }: ScheduleEditorProps) {
                 <Separator />
                 {releaseInfo ? (
                   <Alert variant="default">
-                    <AlertTitle>Last release</AlertTitle>
+                    <AlertTitle>{t('schedule.editor.lastRelease')}</AlertTitle>
                     <AlertDescription>
-                      release_id: <span className="font-mono">{releaseInfo.releaseId}</span>, rollout status:{' '}
-                      <strong>{releaseInfo.rolloutStatus}</strong>
+                      {t('schedule.editor.releaseSummary', {
+                        releaseId: releaseInfo.releaseId,
+                        status: releaseInfo.rolloutStatus,
+                      })}
                     </AlertDescription>
                   </Alert>
                 ) : (
-                  <p className="text-sm text-muted-foreground">No release info yet.</p>
+                  <p className="text-sm text-muted-foreground">{t('schedule.editor.noReleaseInfo')}</p>
                 )}
               </CardContent>
             </Card>
 
             <Card>
               <CardHeader>
-                <CardTitle>Selected slot editor</CardTitle>
-                <CardDescription>Metadata edit + move/resize/delete actions.</CardDescription>
+                <CardTitle>{t('schedule.editor.selectedSlotEditor')}</CardTitle>
+                <CardDescription>{t('schedule.editor.selectedSlotEditorDesc')}</CardDescription>
               </CardHeader>
               <CardContent className="space-y-3">
                 {selectedSlot ? (
@@ -1420,7 +1447,7 @@ export function ScheduleEditor({ scheduleId }: ScheduleEditorProps) {
                         onValueChange={(value) => setSlotDraft((prev) => ({ ...prev, zone_id: value }))}
                       >
                         <SelectTrigger>
-                          <SelectValue placeholder="Zone" />
+                          <SelectValue placeholder={t('schedule.editor.zone')} />
                         </SelectTrigger>
                         <SelectContent>
                           {timelineZones.map((zone) => (
@@ -1433,10 +1460,10 @@ export function ScheduleEditor({ scheduleId }: ScheduleEditorProps) {
                     </div>
 
                     <Separator className="my-2" />
-                    <p className="text-xs font-semibold text-muted-foreground">Transition & Video</p>
+                    <p className="text-xs font-semibold text-muted-foreground">{t('schedule.editor.transitionVideo')}</p>
                     <div className="grid gap-3 md:grid-cols-3">
                       <div className="space-y-1">
-                        <Label className="text-xs">Transition</Label>
+                        <Label className="text-xs">{t('schedule.editor.transition')}</Label>
                         <Select
                           value={slotDraft.transition_type}
                           onValueChange={(value) =>
@@ -1447,13 +1474,13 @@ export function ScheduleEditor({ scheduleId }: ScheduleEditorProps) {
                             <SelectValue />
                           </SelectTrigger>
                           <SelectContent>
-                            <SelectItem value="cut">Cut</SelectItem>
-                            <SelectItem value="fade">Fade</SelectItem>
+                            <SelectItem value="cut">{t('schedule.editor.cut')}</SelectItem>
+                            <SelectItem value="fade">{t('schedule.editor.fade')}</SelectItem>
                           </SelectContent>
                         </Select>
                       </div>
                       <div className="space-y-1">
-                        <Label className="text-xs">Fade duration (ms)</Label>
+                        <Label className="text-xs">{t('schedule.editor.fadeDuration')}</Label>
                         <Input
                           type="number"
                           min={0}
@@ -1465,7 +1492,7 @@ export function ScheduleEditor({ scheduleId }: ScheduleEditorProps) {
                         />
                       </div>
                       <div className="space-y-1">
-                        <Label className="text-xs">Trim in (ms)</Label>
+                        <Label className="text-xs">{t('schedule.editor.trimIn')}</Label>
                         <Input
                           type="number"
                           min={0}
@@ -1476,7 +1503,7 @@ export function ScheduleEditor({ scheduleId }: ScheduleEditorProps) {
                         />
                       </div>
                       <div className="space-y-1">
-                        <Label className="text-xs">Trim out (ms)</Label>
+                        <Label className="text-xs">{t('schedule.editor.trimOut')}</Label>
                         <Input
                           type="number"
                           min={0}
@@ -1496,7 +1523,7 @@ export function ScheduleEditor({ scheduleId }: ScheduleEditorProps) {
                             }
                             className="accent-primary h-4 w-4 rounded"
                           />
-                          Mute video
+                          {t('schedule.editor.muteVideo')}
                         </label>
                         <label className="flex items-center gap-1.5 text-xs">
                           <input
@@ -1507,63 +1534,63 @@ export function ScheduleEditor({ scheduleId }: ScheduleEditorProps) {
                             }
                             className="accent-primary h-4 w-4 rounded"
                           />
-                          Loop video
+                          {t('schedule.editor.loopVideo')}
                         </label>
                       </div>
                     </div>
 
                     <div className="flex flex-wrap gap-2">
                       <Button variant="outline" onClick={() => void saveSelectedSlotDraft()}>
-                        Save metadata
+                        {t('schedule.editor.saveMetadata')}
                       </Button>
                       <Button variant="outline" onClick={() => void shiftSelectedSlot(-15)}>
-                        Move -15m
+                        {t('schedule.editor.moveMinus15')}
                       </Button>
                       <Button variant="outline" onClick={() => void shiftSelectedSlot(15)}>
-                        Move +15m
+                        {t('schedule.editor.movePlus15')}
                       </Button>
                       <Button variant="outline" onClick={() => void resizeSelectedSlot(-15)}>
-                        Duration -15m
+                        {t('schedule.editor.durationMinus15')}
                       </Button>
                       <Button variant="outline" onClick={() => void resizeSelectedSlot(15)}>
-                        Duration +15m
+                        {t('schedule.editor.durationPlus15')}
                       </Button>
                       <Button variant="ghost" onClick={() => void removeLocalSlot(selectedSlot)}>
-                        Delete slot
+                        {t('schedule.editor.deleteSlot')}
                       </Button>
                     </div>
                   </>
                 ) : (
-                  <p className="text-sm text-muted-foreground">Select a slot from timeline/table first.</p>
+                  <p className="text-sm text-muted-foreground">{t('schedule.editor.selectSlotFirst')}</p>
                 )}
               </CardContent>
             </Card>
 
             {priorityAlerts.length ? (
               <Alert variant="default">
-                <AlertTitle>Priority outcomes</AlertTitle>
+                <AlertTitle>{t('schedule.editor.priorityOutcomes')}</AlertTitle>
                 <AlertDescription>
                   {priorityAlerts.map((item) => `${item.outcome.toUpperCase()} ${item.slotId.slice(0, 8)}: ${item.reason}`).join(' | ')}
                 </AlertDescription>
               </Alert>
             ) : (
               <Alert>
-                <AlertTitle>Priority outcomes</AlertTitle>
-                <AlertDescription>No overlaps detected in current day/week window.</AlertDescription>
+                <AlertTitle>{t('schedule.editor.priorityOutcomes')}</AlertTitle>
+                <AlertDescription>{t('schedule.editor.noOverlaps')}</AlertDescription>
               </Alert>
             )}
 
             {qaIssues.length ? (
               <Alert variant={qaIssues.some((issue) => issue.severity === 'error') ? 'destructive' : 'default'}>
-                <AlertTitle>QA issues</AlertTitle>
+                <AlertTitle>{t('schedule.editor.qaIssues')}</AlertTitle>
                 <AlertDescription>
                   {qaIssues.map((issue) => `${issue.severity.toUpperCase()} ${issue.code}: ${issue.message}`).join(' | ')}
                 </AlertDescription>
               </Alert>
             ) : (
               <Alert>
-                <AlertTitle>QA result</AlertTitle>
-                <AlertDescription>No issues in current session.</AlertDescription>
+                <AlertTitle>{t('schedule.editor.qaResult')}</AlertTitle>
+                <AlertDescription>{t('schedule.editor.qaNoIssues')}</AlertDescription>
               </Alert>
             )}
           </TabsContent>
@@ -1571,12 +1598,12 @@ export function ScheduleEditor({ scheduleId }: ScheduleEditorProps) {
           <TabsContent value="sync" className="space-y-4">
             <Card>
               <CardHeader>
-                <CardTitle>CRDT event stream</CardTitle>
-                <CardDescription>Причины reject и auto-transform для входящих операций</CardDescription>
+                <CardTitle>{t('schedule.editor.crdtStream')}</CardTitle>
+                <CardDescription>{t('schedule.editor.crdtStreamDesc')}</CardDescription>
               </CardHeader>
               <CardContent className="grid gap-3 md:grid-cols-3">
                 <div className="space-y-2">
-                  <h4 className="text-sm font-semibold">Rejected</h4>
+                  <h4 className="text-sm font-semibold">{t('schedule.editor.rejected')}</h4>
                   {rejected.length ? (
                     rejected.map((row) => (
                       <div key={row.operation_id} className="rounded border border-destructive/30 p-2 text-xs">
@@ -1586,12 +1613,12 @@ export function ScheduleEditor({ scheduleId }: ScheduleEditorProps) {
                       </div>
                     ))
                   ) : (
-                    <p className="text-sm text-muted-foreground">No rejected ops.</p>
+                    <p className="text-sm text-muted-foreground">{t('schedule.editor.noRejected')}</p>
                   )}
                 </div>
 
                 <div className="space-y-2">
-                  <h4 className="text-sm font-semibold">Auto-transform</h4>
+                  <h4 className="text-sm font-semibold">{t('schedule.editor.autoTransform')}</h4>
                   {transforms.length ? (
                     transforms.map((row) => (
                       <div key={`${row.operation_id}-${row.reason}`} className="rounded border p-2 text-xs">
@@ -1600,19 +1627,26 @@ export function ScheduleEditor({ scheduleId }: ScheduleEditorProps) {
                       </div>
                     ))
                   ) : (
-                    <p className="text-sm text-muted-foreground">No transforms.</p>
+                    <p className="text-sm text-muted-foreground">{t('schedule.editor.noTransforms')}</p>
                   )}
                 </div>
 
                 <div className="space-y-2">
-                  <h4 className="text-sm font-semibold">Pending ops</h4>
+                  <h4 className="text-sm font-semibold">{t('schedule.editor.pending')}</h4>
                   {pending.length ? (
                     pending.slice(0, 20).map((item) => (
                       <div key={item.operationId} className="rounded border p-2 text-xs">
                         <div className="font-mono">{item.op.causal.operation_id}</div>
                         <div className="mt-1 flex gap-2">
                           <StatusBadge tone="neutral" label={item.op.op_type} />
-                          <StatusBadge tone={isOnline ? 'success' : 'warning'} label={isOnline ? 'online' : 'offline'} />
+                          <StatusBadge
+                            tone={isOnline ? 'success' : 'warning'}
+                            label={
+                              isOnline
+                                ? t('users.statusOnline')
+                                : t('users.statusOffline')
+                            }
+                          />
                         </div>
                         <div className="mt-1 text-muted-foreground">
                           slot: <span className="font-mono">{item.op.slot.slot_id}</span>
@@ -1620,17 +1654,17 @@ export function ScheduleEditor({ scheduleId }: ScheduleEditorProps) {
                       </div>
                     ))
                   ) : (
-                    <p className="text-sm text-muted-foreground">No pending ops.</p>
+                    <p className="text-sm text-muted-foreground">{t('schedule.editor.noPending')}</p>
                   )}
                 </div>
 
                 {crdtEnabled ? (
                   <div className="md:col-span-3 flex flex-wrap gap-2">
                     <Button variant="outline" onClick={requestResync} disabled={syncStatus !== 'online'}>
-                      Force resync
+                      {t('schedule.editor.forceResync')}
                     </Button>
                     <Button variant="outline" disabled={!pending.length} onClick={() => opsBatchMutation.mutate()}>
-                      Flush pending batch
+                      {t('schedule.editor.flushPending')}
                     </Button>
                     <Button
                       variant="outline"
@@ -1640,7 +1674,7 @@ export function ScheduleEditor({ scheduleId }: ScheduleEditorProps) {
                         clearAll();
                       }}
                     >
-                      Revert local pending ops
+                      {t('schedule.editor.revertPending')}
                     </Button>
                   </div>
                 ) : null}

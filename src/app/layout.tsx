@@ -1,8 +1,10 @@
 import type { Metadata } from 'next';
+import { cookies } from 'next/headers';
 import type { ReactNode } from 'react';
 import { Noto_Sans } from 'next/font/google';
 import './globals.css';
 import { Providers } from '@/app/providers';
+import { LOCALE_COOKIE_NAME, normalizeLocale } from '@/lib/i18n';
 import { env } from '@/lib/env';
 
 const notoSans = Noto_Sans({
@@ -26,9 +28,12 @@ export const metadata: Metadata = {
   },
 };
 
-export default function RootLayout({ children }: { children: ReactNode }) {
+export default async function RootLayout({ children }: { children: ReactNode }) {
+  const locale = normalizeLocale(
+    (await cookies()).get(LOCALE_COOKIE_NAME)?.value,
+  );
   return (
-    <html lang="en" className={notoSans.variable} suppressHydrationWarning>
+    <html lang={locale} className={notoSans.variable} suppressHydrationWarning>
       <body className="font-sans antialiased">
         <Providers>{children}</Providers>
       </body>

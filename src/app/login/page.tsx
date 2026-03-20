@@ -1,4 +1,5 @@
 import { LockKeyhole, ShieldCheck } from 'lucide-react';
+import { cookies } from 'next/headers';
 import { env } from '@/lib/env';
 import { Button } from '@/components/ui/button';
 import {
@@ -10,13 +11,19 @@ import {
 } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-const ERROR_MESSAGES: Record<string, string> = {
-  missing_credentials: 'Enter login and password',
-  invalid_credentials: 'Invalid login or password',
-  invalid_response: 'Invalid auth response',
-  mfa_required: 'MFA required. Enter code on the next screen.',
-  not_initialized: 'System is not initialized yet. Run bootstrap install flow first.',
-  deactivated_by_admin: 'Your account was disabled by administrator.',
+import {
+  LOCALE_COOKIE_NAME,
+  getTranslator,
+  normalizeLocale,
+} from '@/lib/i18n';
+
+const ERROR_MESSAGE_KEYS: Record<string, string> = {
+  missing_credentials: 'auth.login.error.missing_credentials',
+  invalid_credentials: 'auth.login.error.invalid_credentials',
+  invalid_response: 'auth.login.error.invalid_response',
+  mfa_required: 'auth.login.error.mfa_required',
+  not_initialized: 'auth.login.error.not_initialized',
+  deactivated_by_admin: 'auth.login.error.deactivated_by_admin',
 };
 
 type InitState = {
@@ -52,25 +59,29 @@ export default async function LoginPage({
 }: {
   searchParams?: Promise<Record<string, string | string[] | undefined>>;
 }) {
+  const cookieStore = await cookies();
+  const locale = normalizeLocale(cookieStore.get(LOCALE_COOKIE_NAME)?.value);
+  const t = getTranslator(locale);
   const params = (await searchParams) ?? {};
   const initState = await fetchInitState();
   const rawError = params.error;
   const errorKey = Array.isArray(rawError) ? rawError[0] : rawError;
-  const errorMessage = errorKey ? ERROR_MESSAGES[errorKey] ?? 'Login failed' : null;
+  const errorMessage = errorKey
+    ? t(ERROR_MESSAGE_KEYS[errorKey] ?? 'auth.login.error.default')
+    : null;
   const showNotInitialized = initState ? !initState.initialized || !initState.has_admin : false;
 
   return (
     <main className="flex min-h-screen items-center justify-center bg-muted/30 p-4">
       <Card className="w-full max-w-md">
         <CardHeader>
-          <CardTitle>Sign in to CampusCast</CardTitle>
-          <CardDescription>Sign in to the CMS panel</CardDescription>
+          <CardTitle>{t('auth.login.title')}</CardTitle>
+          <CardDescription>{t('auth.login.description')}</CardDescription>
         </CardHeader>
         <CardContent className="space-y-6">
           {showNotInitialized ? (
             <p className="rounded-md border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900">
-              CMS is not initialized yet. Run `repo-infra/scripts/bootstrap.sh` with
-              `AUTH_BOOTSTRAP_ADMIN_EMAIL` and `AUTH_BOOTSTRAP_ADMIN_PASSWORD` to create the first administrator.
+              {t('auth.login.warning')}
             </p>
           ) : null}
           <form
@@ -79,7 +90,7 @@ export default async function LoginPage({
             action="/login/submit"
           >
             <div className="space-y-1.5">
-              <Label htmlFor="email">Login</Label>
+              <Label htmlFor="email">{t('auth.login.fieldLogin')}</Label>
               <Input
                 id="email"
                 type="text"
@@ -90,7 +101,7 @@ export default async function LoginPage({
             </div>
 
             <div className="space-y-1.5">
-              <Label htmlFor="password">Password</Label>
+              <Label htmlFor="password">{t('auth.login.fieldPassword')}</Label>
               <Input
                 id="password"
                 type="password"
@@ -101,7 +112,7 @@ export default async function LoginPage({
             </div>
 
             <Button className="w-full" type="submit">
-              Sign in
+              {t('auth.login.submit')}
             </Button>
 
             {errorMessage ? (
@@ -112,11 +123,11 @@ export default async function LoginPage({
           <div className="space-y-2 border-t pt-4 text-sm text-muted-foreground">
             <div className="flex items-center gap-2">
               <ShieldCheck className="size-4" />
-              Auth via API Gateway + refresh cookies
+              {t('auth.login.info.gateway')}
             </div>
             <div className="flex items-center gap-2">
               <LockKeyhole className="size-4" />
-              SSR guards + in-memory access token
+              {t('auth.login.info.ssr')}
             </div>
           </div>
         </CardContent>

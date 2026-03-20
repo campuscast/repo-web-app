@@ -24,14 +24,12 @@ import {
 import { Skeleton } from '@/components/ui/skeleton';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { queryKeys } from '@/lib/query-keys';
+import { useLocale } from '@/hooks/use-locale';
 import { scheduleService } from '@/services/schedule-service';
 import { zoneService } from '@/services/zone-service';
 
-const scheduleSchema = z.object({
-  name: z.string().min(2, 'Введите название расписания')
-});
-
 export function SchedulesOverview() {
+  const { t } = useLocale();
   const queryClient = useQueryClient();
   const roles = useAuthStore((state) => state.roles);
   const allowedZones = useAuthStore((state) => state.zones);
@@ -42,6 +40,14 @@ export function SchedulesOverview() {
   const [statusFilter, setStatusFilter] = useState<'all' | 'draft' | 'locked' | 'published'>('all');
   const [newScheduleName, setNewScheduleName] = useState('');
   const [page, setPage] = useState(1);
+
+  const scheduleSchema = useMemo(
+    () =>
+      z.object({
+        name: z.string().min(2, t('schedules.toast.invalidName')),
+      }),
+    [t],
+  );
 
   const zonesQuery = useQuery({ queryKey: queryKeys.zones, queryFn: zoneService.listZones });
 
@@ -62,19 +68,19 @@ export function SchedulesOverview() {
     mutationFn: async () => {
       const parsed = scheduleSchema.safeParse({ name: newScheduleName.trim() });
       if (!parsed.success) {
-        throw new Error(parsed.error.issues[0]?.message ?? 'Invalid schedule name');
+        throw new Error(parsed.error.issues[0]?.message ?? t('schedules.toast.invalidName'));
       }
 
-      if (!effectiveZoneId) throw new Error('Select zone first');
+      if (!effectiveZoneId) throw new Error(t('schedules.toast.selectZone'));
 
       return scheduleService.createSchedule({ zone_id: effectiveZoneId, name: parsed.data.name });
     },
     onSuccess: async () => {
       setNewScheduleName('');
       await queryClient.invalidateQueries({ queryKey: queryKeys.schedules(effectiveZoneId) });
-      toast.success('Schedule created');
+      toast.success(t('schedules.toast.created'));
     },
-    onError: (error) => toast.error(error instanceof Error ? error.message : 'Create failed')
+    onError: (error) => toast.error(error instanceof Error ? error.message : t('schedules.toast.createFailed'))
   });
 
   const filtered = useMemo(() => {
@@ -95,18 +101,18 @@ export function SchedulesOverview() {
   return (
     <div className="space-y-4">
       <PageHeader
-        description="Список расписаний по зоне с переходом в редактор"
+        description={t('schedules.description')}
         actions={
           <div className="flex gap-2">
             <Input
               value={newScheduleName}
               onChange={(event) => setNewScheduleName(event.target.value)}
-              placeholder="New schedule name"
+              placeholder={t('schedules.newName')}
               className="w-52"
             />
             <Button onClick={() => createMutation.mutate()} disabled={createMutation.isPending}>
               <Plus className="size-4" />
-              Create
+              {t('common.create')}
             </Button>
           </div>
         }
@@ -120,7 +126,7 @@ export function SchedulesOverview() {
         toolbar={
           <div className="flex flex-wrap items-center gap-2">
             <div className="flex items-center gap-1.5">
-              <span className="shrink-0 text-sm text-muted-foreground">Zone:</span>
+              <span className="shrink-0 text-sm text-muted-foreground">{t('schedules.zone')}</span>
               <Select
                 value={effectiveZoneId}
                 onValueChange={(value) => {
@@ -129,7 +135,7 @@ export function SchedulesOverview() {
                 }}
               >
                 <SelectTrigger className="w-[180px]">
-                  <SelectValue placeholder="Select zone" />
+                  <SelectValue placeholder={t('schedules.selectZone')} />
                 </SelectTrigger>
                 <SelectContent>
                   {visibleZones.map((zone) => (
@@ -142,13 +148,13 @@ export function SchedulesOverview() {
             </div>
 
             <div className="flex items-center gap-1.5">
-              <span className="shrink-0 text-sm text-muted-foreground">Status:</span>
+              <span className="shrink-0 text-sm text-muted-foreground">{t('schedules.status')}</span>
               <Select value={statusFilter} onValueChange={(value) => setStatusFilter(value as typeof statusFilter)}>
                 <SelectTrigger className="w-[160px]">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="all">All statuses</SelectItem>
+                  <SelectItem value="all">{t('schedules.allStatuses')}</SelectItem>
                   <SelectItem value="draft">draft</SelectItem>
                   <SelectItem value="locked">locked</SelectItem>
                   <SelectItem value="published">published</SelectItem>
@@ -165,7 +171,7 @@ export function SchedulesOverview() {
                   setSearch(event.target.value);
                   setPage(1);
                 }}
-                placeholder="Search schedule"
+                placeholder={t('schedules.search')}
               />
             </div>
           </div>
@@ -174,11 +180,11 @@ export function SchedulesOverview() {
         <Table>
           <TableHeader>
             <TableRow>
-              <TableHead className="pl-4">Name</TableHead>
-              <TableHead>Schedule ID</TableHead>
-              <TableHead>Status</TableHead>
-              <TableHead>Version</TableHead>
-              <TableHead className="text-right">Action</TableHead>
+              <TableHead className="pl-4">{t('schedules.name')}</TableHead>
+              <TableHead>{t('schedules.scheduleId')}</TableHead>
+              <TableHead>{t('schedules.status')}</TableHead>
+              <TableHead>{t('schedules.version')}</TableHead>
+              <TableHead className="text-right">{t('schedules.action')}</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -209,7 +215,7 @@ export function SchedulesOverview() {
                     <TableCell>{schedule.current_version}</TableCell>
                     <TableCell className="text-right">
                       <Button variant="outline" size="sm" asChild>
-                        <Link href={`/schedules/${schedule.schedule_id}`}>Open editor</Link>
+                        <Link href={`/schedules/${schedule.schedule_id}`}>{t('schedules.openEditor')}</Link>
                       </Button>
                     </TableCell>
                   </TableRow>
@@ -220,9 +226,9 @@ export function SchedulesOverview() {
         {!schedulesQuery.isLoading && !total ? (
           <div className="p-4">
             <EmptyState
-              title="No schedules"
-              description="Создайте первое расписание для выбранной зоны."
-              actionLabel="Create schedule"
+              title={t('schedules.emptyTitle')}
+              description={t('schedules.emptyDescription')}
+              actionLabel={t('schedules.createSchedule')}
               onAction={() => createMutation.mutate()}
             />
           </div>

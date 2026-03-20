@@ -5,15 +5,17 @@ import {
 	SidebarProvider,
 } from '@/components/animate-ui/components/radix/sidebar'
 import { AppSidebar } from '@/components/layout/app-sidebar'
-import { getPathTitle } from '@/components/layout/navigation'
+import { getPathTitleKey } from '@/components/layout/navigation'
 import { Topbar } from '@/components/layout/topbar'
+import { useLocale } from '@/hooks/use-locale'
 import { useUiStore } from '@/store/ui-store'
 import { usePathname } from 'next/navigation'
 import type { ReactNode } from 'react'
 
 export function AppShell({ children }: { children: ReactNode }) {
 	const pathname = usePathname()
-	const title = getPathTitle(pathname)
+	const { t } = useLocale()
+	const title = t(getPathTitleKey(pathname))
 	const sidebarCollapsed = useUiStore(state => state.sidebarCollapsed)
 	const setSidebarCollapsed = useUiStore(state => state.setSidebarCollapsed)
 

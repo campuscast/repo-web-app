@@ -27,6 +27,7 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import { Textarea } from '@/components/ui/textarea';
+import { useLocale } from '@/hooks/use-locale';
 import { contentService } from '@/services/content-service';
 import { publicationService } from '@/services/publication-service';
 import { zoneService } from '@/services/zone-service';
@@ -84,6 +85,7 @@ function makeDefaultItem(type: 'custom_slide' | 'video_asset'): PublicationItem 
 }
 
 export function PublicationsManager() {
+  const { t } = useLocale();
   const roles = useAuthStore((state) => state.roles);
   const allowedZones = useAuthStore((state) => state.zones);
   const hasPermission = useAuthStore((state) => state.hasPermission);
@@ -135,11 +137,11 @@ export function PublicationsManager() {
         setAssets([]);
       }
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : 'Failed to load publications');
+      toast.error(error instanceof Error ? error.message : t('publications.toast.loadFailed'));
     } finally {
       setLoading(false);
     }
-  }, [canRead, selectedZoneId]);
+  }, [canRead, selectedZoneId, t]);
 
   useEffect(() => {
     void load();
@@ -156,10 +158,10 @@ export function PublicationsManager() {
         setPublications(publicationRows);
         setAssets(assetRows.filter((asset) => asset.status === 'ready'));
       } catch (error) {
-        toast.error(error instanceof Error ? error.message : 'Failed to refresh selected zone');
+        toast.error(error instanceof Error ? error.message : t('publications.toast.refreshZoneFailed'));
       }
     })();
-  }, [canRead, selectedZoneId]);
+  }, [canRead, selectedZoneId, t]);
 
   const resetEditor = () => {
     setEditingPublication(null);
@@ -170,7 +172,7 @@ export function PublicationsManager() {
     setEditingPublication(null);
     setEditorState({
       ...EMPTY_EDITOR,
-      title: 'New publication',
+      title: t('publications.createPublication'),
       items: [makeDefaultItem('custom_slide')],
     });
     setEditorOpen(true);
@@ -205,11 +207,11 @@ export function PublicationsManager() {
 
   const savePublication = async () => {
     if (!selectedZoneId) {
-      toast.error('Select zone first');
+      toast.error(t('publications.toast.selectZoneFirst'));
       return;
     }
     if (!editorState.title.trim()) {
-      toast.error('Publication title is required');
+      toast.error(t('publications.toast.titleRequired'));
       return;
     }
 
@@ -231,12 +233,12 @@ export function PublicationsManager() {
           items: editorState.items,
         });
       }
-      toast.success('Publication saved');
+      toast.success(t('publications.toast.saved'));
       setEditorOpen(false);
       resetEditor();
       await load();
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : 'Failed to save publication');
+      toast.error(error instanceof Error ? error.message : t('publications.toast.saveFailed'));
     } finally {
       setSaving(false);
     }
@@ -245,19 +247,19 @@ export function PublicationsManager() {
   const archivePublication = async (publicationId: string) => {
     try {
       await publicationService.archive(publicationId);
-      toast.success('Publication archived');
+      toast.success(t('publications.toast.archived'));
       await load();
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : 'Failed to archive publication');
+      toast.error(error instanceof Error ? error.message : t('publications.toast.archiveFailed'));
     }
   };
 
   if (!canRead) {
     return (
       <div className="space-y-4">
-        <PageHeader description="Publication editor MVP" />
+        <PageHeader description={t('publications.editorMvp')} />
         <p className="rounded-md border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
-          You do not have permission to view publications.
+          {t('publications.noPermission')}
         </p>
       </div>
     );
@@ -266,12 +268,12 @@ export function PublicationsManager() {
   return (
     <div className="space-y-6">
       <PageHeader
-        description="Create and manage publication bundles for schedule slots"
+        description={t('publications.description')}
         actions={
           canWrite ? (
             <Button size="sm" onClick={openCreate}>
               <Plus className="mr-1.5 size-4" />
-              Create Publication
+              {t('publications.create')}
             </Button>
           ) : null
         }
@@ -280,7 +282,7 @@ export function PublicationsManager() {
       <div className="flex items-center gap-3">
         <Select value={selectedZoneId} onValueChange={setSelectedZoneId}>
           <SelectTrigger className="w-[280px]">
-            <SelectValue placeholder="Select zone" />
+            <SelectValue placeholder={t('publications.selectZone')} />
           </SelectTrigger>
           <SelectContent>
             {visibleZones.map((zone) => (
@@ -299,12 +301,12 @@ export function PublicationsManager() {
         <Table>
           <TableHeader>
             <TableRow>
-              <TableHead>Title</TableHead>
-              <TableHead>Type</TableHead>
-              <TableHead>Status</TableHead>
-              <TableHead>Version</TableHead>
-              <TableHead>Items</TableHead>
-              {canWrite && <TableHead className="text-right">Actions</TableHead>}
+              <TableHead>{t('publications.title')}</TableHead>
+              <TableHead>{t('publications.type')}</TableHead>
+              <TableHead>{t('publications.status')}</TableHead>
+              <TableHead>{t('publications.version')}</TableHead>
+              <TableHead>{t('publications.items')}</TableHead>
+              {canWrite && <TableHead className="text-right">{t('publications.actions')}</TableHead>}
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -322,12 +324,12 @@ export function PublicationsManager() {
                 {canWrite ? (
                   <TableCell className="space-x-2 text-right">
                     <Button variant="outline" size="sm" onClick={() => openEdit(publication)}>
-                      Edit
+                      {t('publications.edit')}
                     </Button>
                     <Button
                       variant="ghost"
                       size="icon"
-                      title="Archive publication"
+                      title={t('publications.archive')}
                       onClick={() => void archivePublication(publication.publication_id)}
                     >
                       <Trash2 className="size-4" />
@@ -339,7 +341,7 @@ export function PublicationsManager() {
             {!loading && publications.length === 0 ? (
               <TableRow>
                 <TableCell colSpan={canWrite ? 6 : 5} className="py-8 text-center text-muted-foreground">
-                  No publications for selected zone
+                  {t('publications.empty')}
                 </TableCell>
               </TableRow>
             ) : null}
@@ -350,20 +352,22 @@ export function PublicationsManager() {
       <Dialog open={editorOpen} onOpenChange={(open) => { setEditorOpen(open); if (!open) resetEditor(); }}>
         <DialogContent className="max-h-[90vh] max-w-4xl overflow-auto">
           <DialogHeader>
-            <DialogTitle>{editingPublication ? 'Edit publication' : 'Create publication'}</DialogTitle>
+            <DialogTitle>
+              {editingPublication ? t('publications.editPublication') : t('publications.createPublication')}
+            </DialogTitle>
           </DialogHeader>
 
           <div className="space-y-6">
             <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
               <div className="space-y-1.5 md:col-span-2">
-                <Label>Title</Label>
+                <Label>{t('publications.title')}</Label>
                 <Input
                   value={editorState.title}
                   onChange={(event) => setEditorState((prev) => ({ ...prev, title: event.target.value }))}
                 />
               </div>
               <div className="space-y-1.5">
-                <Label>Status</Label>
+                <Label>{t('publications.status')}</Label>
                 <Select
                   value={editorState.status}
                   onValueChange={(value) => setEditorState((prev) => ({ ...prev, status: value }))}
@@ -378,8 +382,12 @@ export function PublicationsManager() {
             </div>
 
             <div className="flex gap-2">
-              <Button variant="outline" size="sm" onClick={() => addItem('custom_slide')}>Add slide</Button>
-              <Button variant="outline" size="sm" onClick={() => addItem('video_asset')}>Add video item</Button>
+              <Button variant="outline" size="sm" onClick={() => addItem('custom_slide')}>
+                {t('publications.addSlide')}
+              </Button>
+              <Button variant="outline" size="sm" onClick={() => addItem('video_asset')}>
+                {t('publications.addVideoItem')}
+              </Button>
             </div>
 
             <div className="space-y-4">
@@ -387,7 +395,7 @@ export function PublicationsManager() {
                 <div key={item.item_id || `${item.type}-${index}`} className="space-y-3 rounded-md border p-3">
                   <div className="grid grid-cols-1 gap-3 md:grid-cols-4">
                     <div className="space-y-1.5">
-                      <Label>Type</Label>
+                      <Label>{t('publications.itemType')}</Label>
                       <Select
                         value={item.type}
                         onValueChange={(value: 'custom_slide' | 'video_asset') => {
@@ -407,7 +415,7 @@ export function PublicationsManager() {
                     </div>
 
                     <div className="space-y-1.5 md:col-span-2">
-                      <Label>Item title</Label>
+                      <Label>{t('publications.itemTitle')}</Label>
                       <Input
                         value={item.title || ''}
                         onChange={(event) => upsertItem(index, { ...item, title: event.target.value })}
@@ -415,7 +423,7 @@ export function PublicationsManager() {
                     </div>
 
                     <div className="space-y-1.5">
-                      <Label>Duration (ms)</Label>
+                      <Label>{t('publications.duration')}</Label>
                       <Input
                         type="number"
                         value={item.duration_ms || 10000}
@@ -429,7 +437,7 @@ export function PublicationsManager() {
 
                   <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
                     <div className="space-y-1.5">
-                      <Label>Transition</Label>
+                      <Label>{t('publications.transition')}</Label>
                       <Select
                         value={item.transition?.type || 'cut'}
                         onValueChange={(value: 'cut' | 'fade') => upsertItem(index, {
@@ -445,7 +453,7 @@ export function PublicationsManager() {
                       </Select>
                     </div>
                     <div className="space-y-1.5">
-                      <Label>Transition duration (ms)</Label>
+                      <Label>{t('publications.transitionDuration')}</Label>
                       <Input
                         type="number"
                         value={item.transition?.duration_ms || 0}
@@ -464,7 +472,7 @@ export function PublicationsManager() {
                     <div className="space-y-3">
                       <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
                         <div className="space-y-1.5">
-                          <Label>Background</Label>
+                          <Label>{t('publications.background')}</Label>
                           <Input
                             value={item.slide?.background || ''}
                             onChange={(event) => upsertItem(index, {
@@ -474,7 +482,7 @@ export function PublicationsManager() {
                           />
                         </div>
                         <div className="space-y-1.5">
-                          <Label>Layout</Label>
+                          <Label>{t('publications.layout')}</Label>
                           <Select
                             value={item.slide?.layout || 'centered'}
                             onValueChange={(value: 'centered' | 'split' | 'title-top') => upsertItem(index, {
@@ -491,7 +499,7 @@ export function PublicationsManager() {
                           </Select>
                         </div>
                         <div className="space-y-1.5">
-                          <Label>Image asset</Label>
+                          <Label>{t('publications.imageAsset')}</Label>
                         <Select
                             value={item.slide?.image_asset_id || '__none__'}
                             onValueChange={(value) => upsertItem(index, {
@@ -499,9 +507,9 @@ export function PublicationsManager() {
                               slide: { ...(item.slide || {}), image_asset_id: value === '__none__' ? '' : value },
                             })}
                           >
-                            <SelectTrigger><SelectValue placeholder="Optional image" /></SelectTrigger>
+                            <SelectTrigger><SelectValue placeholder={t('publications.optionalImage')} /></SelectTrigger>
                             <SelectContent>
-                              <SelectItem value="__none__">None</SelectItem>
+                              <SelectItem value="__none__">{t('publications.none')}</SelectItem>
                               {assets.map((asset) => (
                                 <SelectItem key={asset.asset_id} value={asset.asset_id}>
                                   {asset.filename}
@@ -513,7 +521,7 @@ export function PublicationsManager() {
                       </div>
 
                       <div className="space-y-1.5">
-                        <Label>Slide title</Label>
+                        <Label>{t('publications.slideTitle')}</Label>
                         <Input
                           value={item.slide?.title || ''}
                           onChange={(event) => upsertItem(index, {
@@ -524,7 +532,7 @@ export function PublicationsManager() {
                       </div>
 
                       <div className="space-y-1.5">
-                        <Label>Slide body</Label>
+                        <Label>{t('publications.slideBody')}</Label>
                         <Textarea
                           rows={4}
                           value={item.slide?.body || ''}
@@ -538,7 +546,7 @@ export function PublicationsManager() {
                   ) : (
                     <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
                       <div className="space-y-1.5">
-                        <Label>Video asset</Label>
+                        <Label>{t('publications.videoAsset')}</Label>
                         <Select
                           value={item.video?.asset_id || '__none__'}
                           onValueChange={(value) => upsertItem(index, {
@@ -546,9 +554,9 @@ export function PublicationsManager() {
                             video: { ...(item.video || {}), asset_id: value === '__none__' ? '' : value },
                           })}
                         >
-                          <SelectTrigger><SelectValue placeholder="Select asset" /></SelectTrigger>
+                          <SelectTrigger><SelectValue placeholder={t('publications.selectAsset')} /></SelectTrigger>
                           <SelectContent>
-                            <SelectItem value="__none__">Select asset</SelectItem>
+                            <SelectItem value="__none__">{t('publications.selectAsset')}</SelectItem>
                             {assets
                               .filter((asset) => asset.content_type.startsWith('video/'))
                               .map((asset) => (
@@ -560,7 +568,7 @@ export function PublicationsManager() {
                         </Select>
                       </div>
                       <div className="space-y-1.5">
-                        <Label>Trim in (ms)</Label>
+                        <Label>{t('publications.trimIn')}</Label>
                         <Input
                           type="number"
                           value={item.video?.trim_in_ms || 0}
@@ -574,7 +582,7 @@ export function PublicationsManager() {
                         />
                       </div>
                       <div className="space-y-1.5">
-                        <Label>Trim out (ms)</Label>
+                        <Label>{t('publications.trimOut')}</Label>
                         <Input
                           type="number"
                           value={item.video?.trim_out_ms || 0}
@@ -598,7 +606,7 @@ export function PublicationsManager() {
                             video: { ...(item.video || {}), mute: event.target.checked },
                           })}
                         />
-                        <Label>Mute</Label>
+                        <Label>{t('publications.mute')}</Label>
                       </div>
 
                       <div className="flex items-center gap-2">
@@ -611,14 +619,14 @@ export function PublicationsManager() {
                             video: { ...(item.video || {}), loop: event.target.checked },
                           })}
                         />
-                        <Label>Loop</Label>
+                        <Label>{t('publications.loop')}</Label>
                       </div>
                     </div>
                   )}
 
                   <div className="flex justify-end">
                     <Button variant="ghost" size="sm" onClick={() => removeItem(index)}>
-                      Remove item
+                      {t('publications.removeItem')}
                     </Button>
                   </div>
                 </div>
@@ -628,10 +636,10 @@ export function PublicationsManager() {
 
           <DialogFooter>
             <Button variant="outline" onClick={() => { setEditorOpen(false); resetEditor(); }}>
-              Cancel
+              {t('settings.cancel')}
             </Button>
             <Button onClick={savePublication} disabled={saving}>
-              {saving ? 'Saving...' : 'Save publication'}
+              {saving ? t('publications.saving') : t('publications.savePublication')}
             </Button>
           </DialogFooter>
         </DialogContent>
