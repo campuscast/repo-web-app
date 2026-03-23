@@ -232,6 +232,8 @@ export const publicationSlideSchema = z.object({
   image_asset_id: z.string().default(''),
   logo_asset_id: z.string().default(''),
   layout: z.enum(['centered', 'split', 'title-top']).default('centered'),
+  image_fit: z.enum(['cover', 'contain', 'stretch', 'center']).default('cover'),
+  text_overlay: z.boolean().default(true),
 }).partial();
 
 export const publicationVideoSchema = z.object({
@@ -306,6 +308,51 @@ export const schedulesListResponseSchema = z.object({
   pagination: paginationSchema.default({ total: 0, page: 1, page_size: 20 })
 });
 
+export const scheduleDaySummarySchema = z.object({
+  date: z.string(),
+  slot_count: z.number().int().nonnegative().default(0),
+  asset_slots: z.number().int().nonnegative().default(0),
+  publication_slots: z.number().int().nonnegative().default(0),
+  total_duration_minutes: z.number().int().nonnegative().default(0),
+});
+
+export const scheduleDayViewSchema = z.object({
+  schedule_id: z.string(),
+  schedule_name: z.string(),
+  status: z.string().default('draft'),
+  zone_id: z.string(),
+  date: z.string(),
+  summary: scheduleDaySummarySchema,
+  slots: z.array(scheduleSlotSchema).default([]),
+});
+
+export const scheduleCalendarMonthSummarySchema = z.object({
+  month: z.string(),
+  slot_count: z.number().int().nonnegative().default(0),
+  total_duration_minutes: z.number().int().nonnegative().default(0),
+});
+
+export const scheduleCalendarResponseSchema = z.object({
+  schedule_id: z.string(),
+  schedule_name: z.string(),
+  zone_id: z.string(),
+  view: z.enum(['day', 'week', 'month', 'year']),
+  range: z.object({
+    from: z.string(),
+    to: z.string(),
+    anchor: z.string(),
+  }),
+  summaries: z.array(scheduleDaySummarySchema).default([]),
+  months: z.array(scheduleCalendarMonthSummarySchema).default([]),
+  slots: z.array(scheduleSlotSchema).default([]),
+});
+
+export const scheduleUsageSchema = z.object({
+  zone_id: z.string(),
+  assets: z.record(z.string(), z.number()).default({}),
+  publications: z.record(z.string(), z.number()).default({}),
+});
+
 export const lockResponseSchema = z.object({
   acquired: z.boolean(),
   lock_token: z.string().default(''),
@@ -376,9 +423,17 @@ export const validationIssueSchema = z.object({
 });
 
 export const validationResultSchema = z.object({
-  valid: z.boolean(),
-  has_fatal: z.boolean(),
+  valid: z.boolean().optional(),
+  has_fatal: z.boolean().optional(),
   issues: z.array(validationIssueSchema).default([])
+}).transform((value) => {
+  const hasFatalFromIssues = value.issues.some((issue) => issue.severity === 'error');
+  const hasFatal = value.has_fatal ?? (typeof value.valid === 'boolean' ? !value.valid : hasFatalFromIssues);
+  return {
+    valid: !hasFatal,
+    has_fatal: hasFatal,
+    issues: value.issues,
+  };
 });
 
 export const publishResponseSchema = z.object({
@@ -386,6 +441,57 @@ export const publishResponseSchema = z.object({
   validation_passed: z.boolean(),
   issues: z.array(validationIssueSchema).default([]),
   rollout_status: z.enum(['pending', 'rolling_out', 'active', 'failed']).default('pending')
+});
+
+export const releaseManifestSummarySchema = z.object({
+  slot_count: z.number().int().nonnegative().default(0),
+  asset_count: z.number().int().nonnegative().default(0),
+  publication_count: z.number().int().nonnegative().default(0),
+  manifest_hash: z.string().default(''),
+  has_signature: z.boolean().default(false),
+});
+
+export const scheduleReleaseSchema = z.object({
+  release_id: z.string(),
+  schedule_id: z.string(),
+  schedule_name: z.string().default(''),
+  version_number: z.number().int().default(0),
+  zone_id: z.string(),
+  target_group_ids: z.array(z.string()).default([]),
+  manifest_url: z.string().default(''),
+  manifest_signature: z.string().default(''),
+  manifest_key_id: z.string().default(''),
+  manifest_present: z.boolean().default(false),
+  status: z.string().default('pending'),
+  published_at: z.string(),
+  manifest_summary: releaseManifestSummarySchema.default({
+    slot_count: 0,
+    asset_count: 0,
+    publication_count: 0,
+    manifest_hash: '',
+    has_signature: false,
+  }),
+});
+
+export const releasesListResponseSchema = z.object({
+  data: z.array(scheduleReleaseSchema).default([]),
+  pagination: paginationSchema.default({ total: 0, page: 1, page_size: 20 }),
+});
+
+export const devicePreviewSchema = z.object({
+  device_id: z.string(),
+  device_name: z.string().default(''),
+  zone_id: z.string().default(''),
+  group_id: z.string().default(''),
+  preview_available: z.boolean().default(false),
+  image_base64: z.string().nullable().optional(),
+  image_url: z.string().nullable().optional(),
+  mime_type: z.string().default('image/png'),
+  status: z.string().nullable().optional(),
+  captured_at: z.string().nullable().optional(),
+  width: z.number().int().nullable().optional(),
+  height: z.number().int().nullable().optional(),
+  updated_at: z.string().nullable().optional(),
 });
 
 export type TokenPair = z.infer<typeof tokenPairSchema>;
@@ -411,6 +517,10 @@ export type PublicationItem = z.infer<typeof publicationItemSchema>;
 export type Publication = z.infer<typeof publicationSchema>;
 export type Schedule = z.infer<typeof scheduleSchema>;
 export type ScheduleSlot = z.infer<typeof scheduleSlotSchema>;
+export type ScheduleDaySummary = z.infer<typeof scheduleDaySummarySchema>;
+export type ScheduleDayView = z.infer<typeof scheduleDayViewSchema>;
+export type ScheduleCalendarResponse = z.infer<typeof scheduleCalendarResponseSchema>;
+export type ScheduleUsage = z.infer<typeof scheduleUsageSchema>;
 export type SlotMetadata = z.infer<typeof slotMetadataSchema>;
 export type ScheduleOp = z.infer<typeof scheduleOpSchema>;
 export type SignedScheduleOp = z.infer<typeof signedScheduleOpSchema>;
@@ -419,6 +529,9 @@ export type LockResponse = z.infer<typeof lockResponseSchema>;
 export type ValidationIssue = z.infer<typeof validationIssueSchema>;
 export type ValidationResult = z.infer<typeof validationResultSchema>;
 export type PublishResponse = z.infer<typeof publishResponseSchema>;
+export type ReleaseManifestSummary = z.infer<typeof releaseManifestSummarySchema>;
+export type ScheduleRelease = z.infer<typeof scheduleReleaseSchema>;
+export type DevicePreview = z.infer<typeof devicePreviewSchema>;
 export type AdminUser = z.infer<typeof adminUserSchema>;
 export type AdminUserDetails = z.infer<typeof adminUserDetailsSchema>;
 export type AdminRole = z.infer<typeof roleSchema>;

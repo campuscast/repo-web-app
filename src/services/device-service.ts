@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { apiClient } from '@/services/api-client';
 import {
+  devicePreviewSchema,
   deviceSchema,
   registerDeviceRequestSchema,
   registerDeviceResponseSchema,
@@ -12,7 +13,8 @@ import {
   type CreatePendingRequest,
   type CreatePendingDeviceResponse,
   type UpdateDeviceRequest,
-  type ActivationResponse
+  type ActivationResponse,
+  type DevicePreview
 } from '@/types/api';
 
 const devicesListSchema = z.object({
@@ -21,6 +23,9 @@ const devicesListSchema = z.object({
 
 export const deviceService = {
   getDevice: (deviceId: string): Promise<Device> => apiClient.get(`/devices/${deviceId}`, deviceSchema),
+
+  getPreview: (deviceId: string): Promise<DevicePreview> =>
+    apiClient.get(`/devices/${deviceId}/preview`, devicePreviewSchema),
 
   /** Legacy: register + activate in one call. */
   register: (payload: RegisterDeviceRequest): Promise<RegisterDeviceResponse> => {

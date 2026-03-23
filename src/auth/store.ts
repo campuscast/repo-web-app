@@ -20,6 +20,28 @@ type AuthState = {
   isAdmin: () => boolean;
 };
 
+function areStringArraysEqual(left: string[], right: string[]) {
+  if (left === right) return true;
+  if (left.length !== right.length) return false;
+
+  for (let index = 0; index < left.length; index += 1) {
+    if (left[index] !== right[index]) return false;
+  }
+
+  return true;
+}
+
+function isSameUser(left: UserMe['user'] | null, right: UserMe['user']) {
+  if (!left) return false;
+
+  return (
+    left.id === right.id &&
+    left.email === right.email &&
+    left.name === right.name &&
+    left.must_change_password === right.must_change_password
+  );
+}
+
 export const useAuthStore = create<AuthState>((set, get) => ({
   status: 'unknown',
   user: null,
@@ -28,13 +50,28 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   zones: [],
   crdtEnabled: false,
   hydrateFromMe: (me) =>
-    set({
-      status: 'authenticated',
-      user: me.user,
-      roles: me.roles,
-      permissions: me.permissions || [],
-      zones: me.zones,
-      crdtEnabled: me.crdt_enabled
+    set((state) => {
+      const nextPermissions = me.permissions || [];
+      const isUnchanged =
+        state.status === 'authenticated' &&
+        state.crdtEnabled === me.crdt_enabled &&
+        isSameUser(state.user, me.user) &&
+        areStringArraysEqual(state.roles, me.roles) &&
+        areStringArraysEqual(state.permissions, nextPermissions) &&
+        areStringArraysEqual(state.zones, me.zones);
+
+      if (isUnchanged) {
+        return state;
+      }
+
+      return {
+        status: 'authenticated',
+        user: me.user,
+        roles: me.roles,
+        permissions: nextPermissions,
+        zones: me.zones,
+        crdtEnabled: me.crdt_enabled
+      };
     }),
   setAnonymous: () =>
     set({

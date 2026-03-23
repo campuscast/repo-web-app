@@ -1,56 +1,57 @@
 'use client';
 
-import Link from 'next/link';
 import { useMemo, useState } from 'react';
+import { useRouter } from 'next/navigation';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Plus, Search } from 'lucide-react';
 import { z } from 'zod';
 import { toast } from 'sonner';
-import { useAuthStore } from '@/auth/store';
 import { hasRole } from '@/auth/guards';
+import { useAuthStore } from '@/auth/store';
 import { DataTable } from '@/components/common/data-table';
 import { EmptyState } from '@/components/common/empty-state';
 import { PageHeader } from '@/components/common/page-header';
 import { StatusBadge } from '@/components/common/status-badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue
-} from '@/components/ui/select';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { queryKeys } from '@/lib/query-keys';
-import { useLocale } from '@/hooks/use-locale';
 import { scheduleService } from '@/services/schedule-service';
 import { zoneService } from '@/services/zone-service';
 
+const PAGE_SIZE = 12;
+
+const scheduleSchema = z.object({
+  name: z.string().min(2, 'Название должно быть не короче 2 символов'),
+});
+
+function scheduleTone(status: 'draft' | 'locked' | 'published'): 'success' | 'warning' | 'neutral' {
+  if (status === 'published') return 'success';
+  if (status === 'locked') return 'warning';
+  return 'neutral';
+}
+
+function todayDateKey() {
+  return new Date().toISOString().slice(0, 10);
+}
+
 export function SchedulesOverview() {
-  const { t } = useLocale();
+  const router = useRouter();
   const queryClient = useQueryClient();
+
   const roles = useAuthStore((state) => state.roles);
   const allowedZones = useAuthStore((state) => state.zones);
-  const isAdmin = hasRole(roles, 'admin');
+  const isAdmin = hasRole(roles, 'admin') || hasRole(roles, 'super_admin');
 
   const [selectedZoneId, setSelectedZoneId] = useState('');
+  const [newScheduleName, setNewScheduleName] = useState('');
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState<'all' | 'draft' | 'locked' | 'published'>('all');
-  const [newScheduleName, setNewScheduleName] = useState('');
   const [page, setPage] = useState(1);
 
-  const scheduleSchema = useMemo(
-    () =>
-      z.object({
-        name: z.string().min(2, t('schedules.toast.invalidName')),
-      }),
-    [t],
-  );
-
   const zonesQuery = useQuery({ queryKey: queryKeys.zones, queryFn: zoneService.listZones });
-
   const visibleZones = useMemo(() => {
     const zones = zonesQuery.data ?? [];
     return isAdmin ? zones : zones.filter((zone) => allowedZones.includes(zone.zone_id));
@@ -61,108 +62,105 @@ export function SchedulesOverview() {
   const schedulesQuery = useQuery({
     queryKey: effectiveZoneId ? queryKeys.schedules(effectiveZoneId) : ['schedules', 'none'],
     queryFn: () => scheduleService.listSchedules(effectiveZoneId),
-    enabled: Boolean(effectiveZoneId)
+    enabled: Boolean(effectiveZoneId),
   });
 
   const createMutation = useMutation({
     mutationFn: async () => {
       const parsed = scheduleSchema.safeParse({ name: newScheduleName.trim() });
       if (!parsed.success) {
-        throw new Error(parsed.error.issues[0]?.message ?? t('schedules.toast.invalidName'));
+        throw new Error(parsed.error.issues[0]?.message ?? 'Некорректное название');
       }
-
-      if (!effectiveZoneId) throw new Error(t('schedules.toast.selectZone'));
-
+      if (!effectiveZoneId) throw new Error('Сначала выберите зону');
       return scheduleService.createSchedule({ zone_id: effectiveZoneId, name: parsed.data.name });
     },
-    onSuccess: async () => {
+    onSuccess: async (schedule) => {
       setNewScheduleName('');
       await queryClient.invalidateQueries({ queryKey: queryKeys.schedules(effectiveZoneId) });
-      toast.success(t('schedules.toast.created'));
+      toast.success('Расписание создано');
+      router.push(`/schedules/${schedule.schedule_id}?tab=calendar&date=${todayDateKey()}`);
     },
-    onError: (error) => toast.error(error instanceof Error ? error.message : t('schedules.toast.createFailed'))
+    onError: (error) => toast.error(error instanceof Error ? error.message : 'Не удалось создать расписание'),
   });
 
   const filtered = useMemo(() => {
     const rows = schedulesQuery.data ?? [];
-    const lowered = search.toLowerCase();
+    const lowered = search.trim().toLowerCase();
 
     return rows.filter((item) => {
-      const matchSearch = item.name.toLowerCase().includes(lowered) || item.schedule_id.toLowerCase().includes(lowered);
-      const matchStatus = statusFilter === 'all' || item.status === statusFilter;
-      return matchSearch && matchStatus;
+      const matchesSearch = !lowered || item.name.toLowerCase().includes(lowered);
+      const matchesStatus = statusFilter === 'all' || item.status === statusFilter;
+      return matchesSearch && matchesStatus;
     });
   }, [schedulesQuery.data, search, statusFilter]);
 
-  const pageSize = 10;
-  const total = filtered.length;
-  const paged = filtered.slice((page - 1) * pageSize, page * pageSize);
+  const paged = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
 
   return (
     <div className="space-y-4">
       <PageHeader
-        description={t('schedules.description')}
-        actions={
+        description="Schedules: выберите расписание, откройте workspace и управляйте публикацией."
+        actions={(
           <div className="flex gap-2">
             <Input
               value={newScheduleName}
               onChange={(event) => setNewScheduleName(event.target.value)}
-              placeholder={t('schedules.newName')}
-              className="w-52"
+              placeholder="Новое расписание"
+              className="w-56"
             />
             <Button onClick={() => createMutation.mutate()} disabled={createMutation.isPending}>
               <Plus className="size-4" />
-              {t('common.create')}
+              Создать
             </Button>
           </div>
-        }
+        )}
       />
 
       <DataTable
-        total={total}
+        total={filtered.length}
         page={page}
-        pageSize={pageSize}
+        pageSize={PAGE_SIZE}
         onPageChange={setPage}
-        toolbar={
+        toolbar={(
           <div className="flex flex-wrap items-center gap-2">
-            <div className="flex items-center gap-1.5">
-              <span className="shrink-0 text-sm text-muted-foreground">{t('schedules.zone')}</span>
-              <Select
-                value={effectiveZoneId}
-                onValueChange={(value) => {
-                  setSelectedZoneId(value);
-                  setPage(1);
-                }}
-              >
-                <SelectTrigger className="w-[180px]">
-                  <SelectValue placeholder={t('schedules.selectZone')} />
-                </SelectTrigger>
-                <SelectContent>
-                  {visibleZones.map((zone) => (
-                    <SelectItem key={zone.zone_id} value={zone.zone_id}>
-                      {zone.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
+            <Select
+              value={effectiveZoneId}
+              onValueChange={(value) => {
+                setSelectedZoneId(value);
+                setPage(1);
+              }}
+            >
+              <SelectTrigger className="w-[220px]">
+                <SelectValue placeholder="Выберите зону" />
+              </SelectTrigger>
+              <SelectContent>
+                {visibleZones.map((zone) => (
+                  <SelectItem key={zone.zone_id} value={zone.zone_id}>
+                    {zone.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
 
-            <div className="flex items-center gap-1.5">
-              <span className="shrink-0 text-sm text-muted-foreground">{t('schedules.status')}</span>
-              <Select value={statusFilter} onValueChange={(value) => setStatusFilter(value as typeof statusFilter)}>
-                <SelectTrigger className="w-[160px]">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">{t('schedules.allStatuses')}</SelectItem>
-                  <SelectItem value="draft">draft</SelectItem>
-                  <SelectItem value="locked">locked</SelectItem>
-                  <SelectItem value="published">published</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
+            <Select
+              value={statusFilter}
+              onValueChange={(value) => {
+                setStatusFilter(value as typeof statusFilter);
+                setPage(1);
+              }}
+            >
+              <SelectTrigger className="w-[180px]">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">Все статусы</SelectItem>
+                <SelectItem value="draft">draft</SelectItem>
+                <SelectItem value="locked">locked</SelectItem>
+                <SelectItem value="published">published</SelectItem>
+              </SelectContent>
+            </Select>
 
-            <div className="relative w-[260px]">
+            <div className="relative w-[280px]">
               <Search className="pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
               <Input
                 className="pl-8"
@@ -171,20 +169,20 @@ export function SchedulesOverview() {
                   setSearch(event.target.value);
                   setPage(1);
                 }}
-                placeholder={t('schedules.search')}
+                placeholder="Поиск по названию"
               />
             </div>
           </div>
-        }
+        )}
       >
         <Table>
           <TableHeader>
             <TableRow>
-              <TableHead className="pl-4">{t('schedules.name')}</TableHead>
-              <TableHead>{t('schedules.scheduleId')}</TableHead>
-              <TableHead>{t('schedules.status')}</TableHead>
-              <TableHead>{t('schedules.version')}</TableHead>
-              <TableHead className="text-right">{t('schedules.action')}</TableHead>
+              <TableHead className="pl-4">Название</TableHead>
+              <TableHead>Зона</TableHead>
+              <TableHead>Статус</TableHead>
+              <TableHead>Версия</TableHead>
+              <TableHead className="text-right">Действие</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -196,39 +194,37 @@ export function SchedulesOverview() {
                     </TableCell>
                   </TableRow>
                 ))
-              : paged.map((schedule) => (
-                  <TableRow key={schedule.schedule_id}>
-                    <TableCell className="pl-4 font-medium">{schedule.name}</TableCell>
-                    <TableCell className="font-mono text-xs">{schedule.schedule_id}</TableCell>
-                    <TableCell>
-                      <StatusBadge
-                        tone={
-                          schedule.status === 'published'
-                            ? 'success'
-                            : schedule.status === 'locked'
-                              ? 'warning'
-                              : 'neutral'
-                        }
-                        label={schedule.status}
-                      />
-                    </TableCell>
-                    <TableCell>{schedule.current_version}</TableCell>
-                    <TableCell className="text-right">
-                      <Button variant="outline" size="sm" asChild>
-                        <Link href={`/schedules/${schedule.schedule_id}`}>{t('schedules.openEditor')}</Link>
-                      </Button>
-                    </TableCell>
-                  </TableRow>
-                ))}
+              : paged.map((schedule) => {
+                  const zoneName = visibleZones.find((zone) => zone.zone_id === schedule.zone_id)?.name ?? 'Unknown zone';
+                  return (
+                    <TableRow key={schedule.schedule_id} className="cursor-pointer">
+                      <TableCell className="pl-4 font-medium">{schedule.name}</TableCell>
+                      <TableCell>{zoneName}</TableCell>
+                      <TableCell>
+                        <StatusBadge tone={scheduleTone(schedule.status)} label={schedule.status} />
+                      </TableCell>
+                      <TableCell>{schedule.current_version}</TableCell>
+                      <TableCell className="text-right">
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => router.push(`/schedules/${schedule.schedule_id}?tab=calendar&date=${todayDateKey()}`)}
+                        >
+                          Открыть workspace
+                        </Button>
+                      </TableCell>
+                    </TableRow>
+                  );
+                })}
           </TableBody>
         </Table>
 
-        {!schedulesQuery.isLoading && !total ? (
+        {!schedulesQuery.isLoading && !filtered.length ? (
           <div className="p-4">
             <EmptyState
-              title={t('schedules.emptyTitle')}
-              description={t('schedules.emptyDescription')}
-              actionLabel={t('schedules.createSchedule')}
+              title="Расписаний пока нет"
+              description="Создайте первое расписание для выбранной зоны."
+              actionLabel="Создать расписание"
               onAction={() => createMutation.mutate()}
             />
           </div>

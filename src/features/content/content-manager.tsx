@@ -378,21 +378,15 @@ export function ContentManager() {
     enabled: Boolean(effectiveZoneId)
   });
 
-  const schedulesQuery = useQuery({
-    queryKey: effectiveZoneId ? queryKeys.schedules(effectiveZoneId) : ['schedules', 'none'],
-    queryFn: () => scheduleService.listSchedules(effectiveZoneId),
+  const usageQuery = useQuery({
+    queryKey: effectiveZoneId ? queryKeys.scheduleUsage(effectiveZoneId) : ['schedule', 'usage', 'none'],
+    queryFn: () => scheduleService.getUsage(effectiveZoneId),
     enabled: Boolean(effectiveZoneId)
   });
 
   const usageCountMap = useMemo<Record<string, number>>(() => {
-    const map: Record<string, number> = {};
-    for (const schedule of schedulesQuery.data ?? []) {
-      for (const slot of schedule.slots) {
-        map[slot.asset_id] = (map[slot.asset_id] ?? 0) + 1;
-      }
-    }
-    return map;
-  }, [schedulesQuery.data]);
+    return usageQuery.data?.assets ?? {};
+  }, [usageQuery.data]);
 
   /* ── Mutations ──────────────────────────────────────────── */
 
