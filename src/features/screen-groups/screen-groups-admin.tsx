@@ -4,7 +4,7 @@ import { useMemo, useState } from 'react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQueries, useQuery, useQueryClient } from '@tanstack/react-query';
 import { MoreHorizontal, Plus, Search, Tv } from 'lucide-react';
 import { toast } from 'sonner';
 import { useAuthStore } from '@/auth/store';
@@ -19,8 +19,7 @@ import {
   DialogDescription,
   DialogFooter,
   DialogHeader,
-  DialogTitle,
-  DialogTrigger
+  DialogTitle
 } from '@/components/ui/dialog';
 import {
   DropdownMenu,
@@ -43,10 +42,14 @@ import { queryKeys } from '@/lib/query-keys';
 import { zoneService } from '@/services/zone-service';
 
 const createGroupSchema = z.object({
-  name: z.string().min(2, 'Введите название группы')
+  name: z.string().min(2, 'Введите название группы'),
+  description: z.string().max(140, 'Максимум 140 символов').optional(),
+  zone_id: z.string().min(1, 'Выберите зону')
 });
 
 type CreateGroupForm = z.infer<typeof createGroupSchema>;
+
+const ALL_ZONES_VALUE = '__all_zones__';
 
 export function ScreenGroupsAdmin() {
   const queryClient = useQueryClient();
@@ -56,12 +59,12 @@ export function ScreenGroupsAdmin() {
 
   const [search, setSearch] = useState('');
   const [page, setPage] = useState(1);
-  const [selectedZoneId, setSelectedZoneId] = useState('');
+  const [selectedZoneId, setSelectedZoneId] = useState(ALL_ZONES_VALUE);
   const [isCreateOpen, setCreateOpen] = useState(false);
 
   const form = useForm<CreateGroupForm>({
     resolver: zodResolver(createGroupSchema),
-    defaultValues: { name: '' }
+    defaultValues: { name: '', description: '', zone_id: '' }
   });
 
   const zonesQuery = useQuery({
@@ -74,99 +77,157 @@ export function ScreenGroupsAdmin() {
     return isAdmin ? zones : zones.filter((zone) => allowedZones.includes(zone.zone_id));
   }, [allowedZones, isAdmin, zonesQuery.data]);
 
-  const effectiveZoneId = selectedZoneId || visibleZones[0]?.zone_id || '';
+  const activeZoneFilter = useMemo(() => {
+    if (selectedZoneId === ALL_ZONES_VALUE) {
+      return ALL_ZONES_VALUE;
+    }
 
-  const groupsQuery = useQuery({
-    queryKey: effectiveZoneId ? queryKeys.zoneGroups(effectiveZoneId) : ['screen-groups', 'none'],
-    queryFn: () => zoneService.listGroups(effectiveZoneId),
-    enabled: Boolean(effectiveZoneId)
+    return visibleZones.some((zone) => zone.zone_id === selectedZoneId)
+      ? selectedZoneId
+      : ALL_ZONES_VALUE;
+  }, [selectedZoneId, visibleZones]);
+
+  const zoneIdsForList = useMemo(
+    () => activeZoneFilter === ALL_ZONES_VALUE
+      ? visibleZones.map((zone) => zone.zone_id)
+      : [activeZoneFilter],
+    [activeZoneFilter, visibleZones]
+  );
+
+  const groupQueries = useQueries({
+    queries: zoneIdsForList.map((zoneId) => ({
+      queryKey: queryKeys.zoneGroups(zoneId),
+      queryFn: () => zoneService.listGroups(zoneId),
+      enabled: Boolean(zoneId)
+    }))
   });
 
+  const groupsLoading = zonesQuery.isLoading || groupQueries.some((query) => query.isLoading);
+  const groups = groupQueries.flatMap((query) => query.data ?? []);
+
   const filtered = useMemo(() => {
-    const rows = groupsQuery.data ?? [];
     const lowered = search.toLowerCase();
-    return rows.filter(
-      (group) => group.name.toLowerCase().includes(lowered) || group.group_id.toLowerCase().includes(lowered)
+    return groups.filter(
+      group =>
+        group.name.toLowerCase().includes(lowered) ||
+        String(group.description || '').toLowerCase().includes(lowered)
     );
-  }, [groupsQuery.data, search]);
+  }, [groups, search]);
 
   const pageSize = 10;
   const total = filtered.length;
   const paged = filtered.slice((page - 1) * pageSize, page * pageSize);
 
   const createGroup = useMutation({
-    mutationFn: (values: CreateGroupForm) => zoneService.createGroup(effectiveZoneId, values),
-    onSuccess: async () => {
+    mutationFn: ({ zone_id, name, description }: CreateGroupForm) => zoneService.createGroup(zone_id, { name, description }),
+    onSuccess: async (_result, values) => {
       setCreateOpen(false);
-      form.reset();
-      await queryClient.invalidateQueries({ queryKey: queryKeys.zoneGroups(effectiveZoneId) });
+      form.reset({ name: '', description: '', zone_id: '' });
+      await queryClient.invalidateQueries({ queryKey: queryKeys.zoneGroups(values.zone_id) });
       toast.success('Group created');
     },
     onError: (error) => toast.error(error instanceof Error ? error.message : 'Failed to create group')
   });
 
   const deleteGroup = useMutation({
-    mutationFn: (groupId: string) => zoneService.deleteGroup(effectiveZoneId, groupId),
-    onSuccess: async () => {
-      await queryClient.invalidateQueries({ queryKey: queryKeys.zoneGroups(effectiveZoneId) });
+    mutationFn: ({ groupId, zoneId }: { groupId: string; zoneId: string }) => zoneService.deleteGroup(zoneId, groupId),
+    onSuccess: async (_result, variables) => {
+      await queryClient.invalidateQueries({ queryKey: queryKeys.zoneGroups(variables.zoneId) });
       toast.success('Group removed');
     },
     onError: (error) => toast.error(error instanceof Error ? error.message : 'Failed to remove group')
   });
 
+  const openCreateDialog = () => {
+    if (!visibleZones.length) {
+      toast.error('Создайте или получите доступ хотя бы к одной зоне');
+      return;
+    }
+
+    form.reset({ name: '', description: '', zone_id: '' });
+    setCreateOpen(true);
+  };
+
   return (
     <div className="space-y-4">
-      <PageHeader
-        description="CRUD групп экранов внутри выбранной зоны"
-        actions={
-          <Dialog open={isCreateOpen} onOpenChange={setCreateOpen}>
-            <DialogTrigger asChild>
-              <Button disabled={!effectiveZoneId}>
-                <Plus className="size-4" />
-                New group
-              </Button>
-            </DialogTrigger>
-            <DialogContent>
-              <DialogHeader>
-                <DialogTitle>Create screen group</DialogTitle>
-                <DialogDescription>
-                  Группа будет создана в зоне <span className="font-mono">{effectiveZoneId || 'N/A'}</span>.
-                </DialogDescription>
-              </DialogHeader>
-              <form className="space-y-4" onSubmit={form.handleSubmit((values) => createGroup.mutate(values))}>
-                <div className="space-y-2">
-                  <Label htmlFor="group-name">Group name</Label>
-                  <Input id="group-name" {...form.register('name')} />
-                  <p className="text-xs text-destructive">{form.formState.errors.name?.message}</p>
-                </div>
-                <DialogFooter>
-                  <Button type="submit" disabled={createGroup.isPending}>
-                    {createGroup.isPending ? 'Creating...' : 'Create'}
-                  </Button>
-                </DialogFooter>
-              </form>
-            </DialogContent>
-          </Dialog>
-        }
-      />
+      <PageHeader description="Управление группами экранов по зонам" />
 
-      <DataTable
-        total={total}
-        page={page}
-        pageSize={pageSize}
-        onPageChange={setPage}
-        toolbar={
-          <div className="flex flex-wrap items-center gap-2">
-            <div className="flex items-center gap-1.5">
-              <span className="shrink-0 text-sm text-muted-foreground">Zone:</span>
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex flex-1 flex-wrap items-center gap-2">
+          <Select
+            value={activeZoneFilter}
+            onValueChange={(value) => {
+              setSelectedZoneId(value);
+              setPage(1);
+            }}
+          >
+            <SelectTrigger className="h-8 w-[220px]">
+              <SelectValue placeholder="Filter by zone" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value={ALL_ZONES_VALUE}>All zones</SelectItem>
+              {visibleZones.map((zone) => (
+                <SelectItem key={zone.zone_id} value={zone.zone_id}>
+                  {zone.name}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+
+          <div className="relative w-full max-w-xs">
+            <Search className="pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+            <Input
+              placeholder="Search group"
+              className="h-8 pl-8"
+              value={search}
+              onChange={(event) => {
+                setSearch(event.target.value);
+                setPage(1);
+              }}
+            />
+          </div>
+        </div>
+
+        <Button className="h-8 self-start sm:self-auto" onClick={openCreateDialog} disabled={!visibleZones.length}>
+          <Plus className="size-4" />
+          New group
+        </Button>
+      </div>
+
+      <Dialog
+        open={isCreateOpen}
+        onOpenChange={(open) => {
+          setCreateOpen(open);
+          if (!open) {
+            form.reset({ name: '', description: '', zone_id: '' });
+          }
+        }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Create screen group</DialogTitle>
+            <DialogDescription>
+              Укажите название группы и выберите зону, к которой она будет принадлежать.
+            </DialogDescription>
+          </DialogHeader>
+          <form className="space-y-4" onSubmit={form.handleSubmit((values) => createGroup.mutate(values))}>
+            <div className="space-y-2">
+              <Label htmlFor="group-name">Group name</Label>
+              <Input id="group-name" {...form.register('name')} />
+              <p className="text-xs text-destructive">{form.formState.errors.name?.message}</p>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="group-description">Description <span className="text-xs font-normal text-muted-foreground">(optional)</span></Label>
+              <Input id="group-description" {...form.register('description')} />
+              <p className="text-xs text-destructive">{form.formState.errors.description?.message}</p>
+            </div>
+            <div className="space-y-2">
+              <Label>Zone</Label>
               <Select
-                value={effectiveZoneId}
-                onValueChange={(value) => {
-                  setSelectedZoneId(value);
-                  setPage(1);
-                }}
+                value={form.watch('zone_id')}
+                onValueChange={(value) => form.setValue('zone_id', value, { shouldValidate: true })}
               >
-                <SelectTrigger className="w-[180px]">
+                <SelectTrigger className="w-full">
                   <SelectValue placeholder="Select zone" />
                 </SelectTrigger>
                 <SelectContent>
@@ -177,33 +238,34 @@ export function ScreenGroupsAdmin() {
                   ))}
                 </SelectContent>
               </Select>
+              <p className="text-xs text-destructive">{form.formState.errors.zone_id?.message}</p>
             </div>
-            <div className="relative w-[260px]">
-              <Search className="pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-              <Input
-                placeholder="Search group"
-                className="pl-8"
-                value={search}
-                onChange={(event) => {
-                  setSearch(event.target.value);
-                  setPage(1);
-                }}
-              />
-            </div>
-          </div>
-        }
+            <DialogFooter>
+              <Button type="submit" disabled={createGroup.isPending}>
+                {createGroup.isPending ? 'Creating...' : 'Create'}
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
+
+      <DataTable
+        total={total}
+        page={page}
+        pageSize={pageSize}
+        onPageChange={setPage}
       >
         <Table>
           <TableHeader>
             <TableRow>
               <TableHead className="pl-4">Group name</TableHead>
-              <TableHead>ID</TableHead>
+              <TableHead>Description</TableHead>
               <TableHead>Zone</TableHead>
               <TableHead className="w-[52px]" />
             </TableRow>
           </TableHeader>
           <TableBody>
-            {groupsQuery.isLoading
+            {groupsLoading
               ? Array.from({ length: 6 }).map((_, index) => (
                   <TableRow key={index}>
                     <TableCell colSpan={4}>
@@ -214,7 +276,7 @@ export function ScreenGroupsAdmin() {
               : paged.map((group) => (
                   <TableRow key={group.group_id}>
                     <TableCell className="pl-4 font-medium">{group.name}</TableCell>
-                    <TableCell className="font-mono text-xs">{group.group_id}</TableCell>
+                    <TableCell className="max-w-[360px] truncate text-muted-foreground">{group.description || '—'}</TableCell>
                     <TableCell className="text-sm text-muted-foreground">
                       {visibleZones.find((z) => z.zone_id === group.zone_id)?.name ?? group.zone_id}
                     </TableCell>
@@ -227,16 +289,8 @@ export function ScreenGroupsAdmin() {
                         </DropdownMenuTrigger>
                         <DropdownMenuContent align="end">
                           <DropdownMenuItem
-                            onClick={async () => {
-                              await navigator.clipboard.writeText(group.group_id);
-                              toast.success('Group ID copied');
-                            }}
-                          >
-                            Copy ID
-                          </DropdownMenuItem>
-                          <DropdownMenuItem
                             className="text-destructive"
-                            onClick={() => deleteGroup.mutate(group.group_id)}
+                            onClick={() => deleteGroup.mutate({ groupId: group.group_id, zoneId: group.zone_id })}
                           >
                             Delete
                           </DropdownMenuItem>
@@ -248,14 +302,18 @@ export function ScreenGroupsAdmin() {
           </TableBody>
         </Table>
 
-        {!groupsQuery.isLoading && !total ? (
+        {!groupsLoading && !total ? (
           <div className="p-4">
             <EmptyState
               icon={<Tv className="size-8" />}
               title="No screen groups"
-              description="Создайте первую группу экранов для выбранной зоны."
+              description={
+                activeZoneFilter === ALL_ZONES_VALUE
+                  ? 'По текущим фильтрам группы экранов не найдены.'
+                  : 'Создайте первую группу экранов для выбранной зоны.'
+              }
               actionLabel="Create group"
-              onAction={() => setCreateOpen(true)}
+              onAction={openCreateDialog}
             />
           </div>
         ) : null}

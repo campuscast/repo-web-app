@@ -1,10 +1,12 @@
 import { apiClient } from '@/services/api-client';
 import {
   contentAssetSchema,
+  contentAssetInfoSchema,
   contentListResponseSchema,
   initUploadRequestSchema,
   initUploadResponseSchema,
   type ContentAsset,
+  type ContentAssetInfo,
   type InitUploadRequest
 } from '@/types/api';
 
@@ -32,12 +34,30 @@ export const contentService = {
   renameAsset: (assetId: string, filename: string) =>
     apiClient.patch<ContentAsset>(`/content/${assetId}`, { filename }, contentAssetSchema),
 
+  getInfo: (assetId: string) =>
+    apiClient.get<ContentAssetInfo>(`/content/asset/${assetId}/info`, contentAssetInfoSchema),
+
+  updateAvailability: (assetId: string, zoneIds: string[]) =>
+    apiClient.patch<ContentAssetInfo>(`/content/${assetId}/availability`, { zone_ids: zoneIds }, contentAssetInfoSchema),
+
+  pruneUnusedAvailability: (assetId: string) =>
+    apiClient.post<ContentAssetInfo>(`/content/${assetId}/availability/prune-unused`, {}, contentAssetInfoSchema),
+
   deleteAsset: (assetId: string) =>
     apiClient.delete(`/content/${assetId}`),
 
-  list: async (zoneId: string) => {
+  list: async (zone: string | string[]) => {
+    const params = new URLSearchParams();
+    if (Array.isArray(zone)) {
+      if (zone.length > 0) {
+        params.set('zone_ids', zone.join(','));
+      }
+    } else if (zone) {
+      params.set('zone_id', zone);
+    }
+
     const data = await apiClient.get<{ data: ContentAsset[]; pagination: { total: number; page: number; page_size: number } }>(
-      `/content?zone_id=${encodeURIComponent(zoneId)}`,
+      `/content?${params.toString()}`,
       contentListResponseSchema
     );
 
@@ -45,4 +65,4 @@ export const contentService = {
   }
 };
 
-export type { ContentAsset };
+export type { ContentAsset, ContentAssetInfo };

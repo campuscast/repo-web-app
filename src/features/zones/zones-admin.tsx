@@ -12,7 +12,6 @@ import { hasRole } from '@/auth/guards';
 import { DataTable } from '@/components/common/data-table';
 import { EmptyState } from '@/components/common/empty-state';
 import { PageHeader } from '@/components/common/page-header';
-import { StatusBadge } from '@/components/common/status-badge';
 import { Button } from '@/components/ui/button';
 import {
   AlertDialog,
@@ -125,9 +124,12 @@ export function ZonesAdmin() {
 
   const filteredZones = useMemo(() => {
     const lowered = search.toLowerCase();
-    return allVisibleZones.filter(
-      (zone) => zone.name.toLowerCase().includes(lowered) || zone.zone_id.toLowerCase().includes(lowered)
-    );
+    return allVisibleZones.filter((zone) => {
+      const matchesSearch =
+        zone.name.toLowerCase().includes(lowered) ||
+        String(zone.description || '').toLowerCase().includes(lowered);
+      return matchesSearch;
+    });
   }, [allVisibleZones, search]);
 
   const pageSize = 8;
@@ -214,106 +216,100 @@ export function ZonesAdmin() {
 
   return (
     <div className="space-y-4">
-      <PageHeader
-        description="Управление зонами вещания, лимитами и CRDT-политиками"
-        actions={
-          isAdmin ? (
-            <Dialog
-              open={isCreateOpen}
-              onOpenChange={(open) => {
-                setCreateOpen(open);
-                if (!open) {
-                  zoneForm.reset();
-                  setZoneNameLimitNotified(false);
-                }
-              }}
-            >
-              <DialogTrigger asChild>
-                <Button>
-                  <Plus className="size-4" />
-                  New zone
-                </Button>
-              </DialogTrigger>
-              <DialogContent>
-                <DialogHeader>
-                  <DialogTitle>Create zone</DialogTitle>
-                  <DialogDescription>Новая зона появится в списке сразу после успешного API-вызова.</DialogDescription>
-                </DialogHeader>
-                <form
-                  className="space-y-4"
-                  onSubmit={zoneForm.handleSubmit((values) => createZone.mutate(values))}
-                >
-                  <div className="space-y-2">
-                    <Label htmlFor="zone-name">Name</Label>
-                    <Input
-                      id="zone-name"
-                      {...zoneForm.register('name', {
-                        onChange: (event) => {
-                          const raw = String(event?.target?.value || '');
-                          if (raw.length > MAX_ZONE_NAME_LENGTH) {
-                            event.target.value = raw.slice(0, MAX_ZONE_NAME_LENGTH);
-                            if (!zoneNameLimitNotified) {
-                              toast.error(`Zone name cannot be longer than ${MAX_ZONE_NAME_LENGTH} characters`);
-                              setZoneNameLimitNotified(true);
-                            }
-                            return;
+      <PageHeader description="Управление зонами вещания, лимитами и CRDT-политиками" />
+
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div className="relative w-full max-w-md">
+          <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+          <Input
+            id="zones-quick-search"
+            value={search}
+            onChange={(event) => {
+              setSearch(event.target.value);
+              setPage(1);
+            }}
+            placeholder="Search by zone name or description"
+            className="h-8 pl-9"
+          />
+        </div>
+
+        {isAdmin ? (
+          <Dialog
+            open={isCreateOpen}
+            onOpenChange={(open) => {
+              setCreateOpen(open);
+              if (!open) {
+                zoneForm.reset();
+                setZoneNameLimitNotified(false);
+              }
+            }}
+          >
+            <DialogTrigger asChild>
+              <Button className="h-8 self-start sm:self-auto">
+                <Plus className="size-4" />
+                New zone
+              </Button>
+            </DialogTrigger>
+            <DialogContent>
+              <DialogHeader>
+                <DialogTitle>Create zone</DialogTitle>
+                <DialogDescription>Новая зона появится в списке сразу после успешного API-вызова.</DialogDescription>
+              </DialogHeader>
+              <form
+                className="space-y-4"
+                onSubmit={zoneForm.handleSubmit((values) => createZone.mutate(values))}
+              >
+                <div className="space-y-2">
+                  <Label htmlFor="zone-name">Name</Label>
+                  <Input
+                    id="zone-name"
+                    {...zoneForm.register('name', {
+                      onChange: (event) => {
+                        const raw = String(event?.target?.value || '');
+                        if (raw.length > MAX_ZONE_NAME_LENGTH) {
+                          event.target.value = raw.slice(0, MAX_ZONE_NAME_LENGTH);
+                          if (!zoneNameLimitNotified) {
+                            toast.error(`Zone name cannot be longer than ${MAX_ZONE_NAME_LENGTH} characters`);
+                            setZoneNameLimitNotified(true);
                           }
-                          if (zoneNameLimitNotified) {
-                            setZoneNameLimitNotified(false);
-                          }
-                        },
-                      })}
-                    />
-                    <p className="text-xs text-destructive">{zoneForm.formState.errors.name?.message}</p>
-                    <p className="text-xs text-muted-foreground">Max {MAX_ZONE_NAME_LENGTH} characters.</p>
-                  </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="zone-desc">Description</Label>
-                    <Input id="zone-desc" {...zoneForm.register('description')} />
-                    <p className="text-xs text-destructive">{zoneForm.formState.errors.description?.message}</p>
-                  </div>
-                  <DialogFooter>
-                    <Button type="submit" disabled={createZone.isPending}>
-                      {createZone.isPending ? 'Creating...' : 'Create zone'}
-                    </Button>
-                  </DialogFooter>
-                </form>
-              </DialogContent>
-            </Dialog>
-          ) : null
-        }
-      />
+                          return;
+                        }
+                        if (zoneNameLimitNotified) {
+                          setZoneNameLimitNotified(false);
+                        }
+                      },
+                    })}
+                  />
+                  <p className="text-xs text-destructive">{zoneForm.formState.errors.name?.message}</p>
+                  <p className="text-xs text-muted-foreground">Max {MAX_ZONE_NAME_LENGTH} characters.</p>
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="zone-desc">Description</Label>
+                  <Input id="zone-desc" {...zoneForm.register('description')} />
+                  <p className="text-xs text-destructive">{zoneForm.formState.errors.description?.message}</p>
+                </div>
+                <DialogFooter>
+                  <Button type="submit" disabled={createZone.isPending}>
+                    {createZone.isPending ? 'Creating...' : 'Create zone'}
+                  </Button>
+                </DialogFooter>
+              </form>
+            </DialogContent>
+          </Dialog>
+        ) : null}
+      </div>
 
       <DataTable
         total={total}
         page={page}
         pageSize={pageSize}
         onPageChange={setPage}
-        toolbar={
-          <div className="flex flex-wrap items-center gap-2">
-            <div className="relative w-[260px]">
-              <Search className="pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-              <Input
-                value={search}
-                onChange={(event) => {
-                  setSearch(event.target.value);
-                  setPage(1);
-                }}
-                placeholder="Search zone"
-                className="pl-8"
-              />
-            </div>
-            <StatusBadge tone="neutral" label={`${total} zones`} />
-          </div>
-        }
       >
         <Table>
           <TableHeader>
             <TableRow>
               <TableHead className="pl-4">Name</TableHead>
-              <TableHead>ID</TableHead>
               <TableHead>Description</TableHead>
-              <TableHead>Scope</TableHead>
               <TableHead className="w-[52px]" />
             </TableRow>
           </TableHeader>
@@ -321,7 +317,7 @@ export function ZonesAdmin() {
             {zonesQuery.isLoading
               ? (
                   <TableRow>
-                    <TableCell colSpan={5} className="py-6 text-center text-sm text-muted-foreground">
+                    <TableCell colSpan={3} className="py-6 text-center text-sm text-muted-foreground">
                       Loading zones...
                     </TableCell>
                   </TableRow>
@@ -329,15 +325,8 @@ export function ZonesAdmin() {
               : pagedZones.map((zone) => (
                   <TableRow key={zone.zone_id}>
                     <TableCell className="pl-4 font-medium">{zone.name}</TableCell>
-                    <TableCell className="font-mono text-xs">{zone.zone_id}</TableCell>
                     <TableCell className="max-w-[360px] truncate text-muted-foreground">
                       {zone.description || '—'}
-                    </TableCell>
-                    <TableCell>
-                      <StatusBadge
-                        tone={allowedZones.includes(zone.zone_id) ? 'success' : 'neutral'}
-                        label={allowedZones.includes(zone.zone_id) ? 'Allowed' : 'Read-only'}
-                      />
                     </TableCell>
                     <TableCell>
                       <DropdownMenu>
@@ -347,14 +336,6 @@ export function ZonesAdmin() {
                           </Button>
                         </DropdownMenuTrigger>
                         <DropdownMenuContent align="end">
-                          <DropdownMenuItem
-                            onClick={async () => {
-                              await navigator.clipboard.writeText(zone.zone_id);
-                              toast.success('Zone ID copied');
-                            }}
-                          >
-                            Copy ID
-                          </DropdownMenuItem>
                           <DropdownMenuItem onClick={() => openPolicyDialog(zone.zone_id)}>
                             Edit policy
                           </DropdownMenuItem>

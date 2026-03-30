@@ -79,6 +79,7 @@ const TABS = [
 ] as const;
 
 type TabId = (typeof TABS)[number]['id'];
+const NO_GROUP_VALUE = '__no_group__';
 
 /* ─── Copy helper ──────────────────────────────────────────────── */
 
@@ -266,13 +267,14 @@ function TabSettings({
           <div className="space-y-2">
             <Label>Screen group</Label>
             <Select
-              value={device.group_id}
-              onValueChange={(groupId) => assignMutation.mutate(groupId)}
+              value={device.group_id || NO_GROUP_VALUE}
+              onValueChange={(groupId) => assignMutation.mutate(groupId === NO_GROUP_VALUE ? '' : groupId)}
             >
               <SelectTrigger className="max-w-sm">
-                <SelectValue placeholder="Select group" />
+                <SelectValue placeholder="No group" />
               </SelectTrigger>
               <SelectContent>
+                <SelectItem value={NO_GROUP_VALUE}>No group</SelectItem>
                 {(groupsQuery.data ?? []).map((group) => (
                   <SelectItem key={group.group_id} value={group.group_id}>
                     {group.name}

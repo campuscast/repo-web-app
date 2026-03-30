@@ -39,7 +39,7 @@ export const zoneService = {
   listGroups: (zoneId: string): Promise<ScreenGroup[]> =>
     apiClient.get(`/zones/${zoneId}/groups`, screenGroupsSchema),
 
-  createGroup: (zoneId: string, payload: { name: string }) =>
+  createGroup: (zoneId: string, payload: { name: string; description?: string }) =>
     apiClient.post(`/zones/${zoneId}/groups`, payload, screenGroupSchema),
 
   deleteGroup: (zoneId: string, groupId: string) =>

@@ -6,6 +6,7 @@ import {
   scheduleDayViewSchema,
   ingestOpsResponseSchema,
   lockResponseSchema,
+  lockRefreshResponseSchema,
   publishResponseSchema,
   scheduleUsageSchema,
   scheduleOpSchema,
@@ -14,6 +15,7 @@ import {
   schedulesListResponseSchema,
   validationResultSchema,
   type LockResponse,
+  type LockRefreshResponse,
   type PublishResponse,
   type ScheduleCalendarResponse,
   type ScheduleDayView,
@@ -40,6 +42,9 @@ export const scheduleService = {
 
   createSchedule: (payload: { zone_id: string; name: string }): Promise<Schedule> =>
     apiClient.post('/schedules', payload, scheduleSchema),
+
+  deleteSchedule: (scheduleId: string): Promise<{ deleted: boolean; schedule_id: string }> =>
+    apiClient.delete(`/schedules/${scheduleId}`),
 
   getSchedule: (scheduleId: string): Promise<Schedule> =>
     apiClient.get(`/schedules/${scheduleId}`, scheduleSchema),
@@ -69,6 +74,17 @@ export const scheduleService = {
 
   lock: (scheduleId: string, ttlSeconds = DEFAULT_LOCK_TTL_SECONDS): Promise<LockResponse> =>
     apiClient.post(`/schedules/${scheduleId}/lock`, { ttl_seconds: ttlSeconds }, lockResponseSchema),
+
+  refreshLock: (
+    scheduleId: string,
+    lockToken: string,
+    ttlSeconds = DEFAULT_LOCK_TTL_SECONDS,
+  ): Promise<LockRefreshResponse> =>
+    apiClient.post(
+      `/schedules/${scheduleId}/lock/refresh`,
+      { lock_token: lockToken, ttl_seconds: ttlSeconds },
+      lockRefreshResponseSchema,
+    ),
 
   unlock: (scheduleId: string, lockToken: string) =>
     apiClient.delete(`/schedules/${scheduleId}/lock`, { lock_token: lockToken }, lockReleaseSchema),

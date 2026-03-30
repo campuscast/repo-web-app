@@ -5,6 +5,7 @@ import {
   deviceSchema,
   registerDeviceRequestSchema,
   registerDeviceResponseSchema,
+  createPendingRequestSchema,
   createPendingDeviceResponseSchema,
   activationResponseSchema,
   type Device,
@@ -35,7 +36,7 @@ export const deviceService = {
 
   /** Create pending device (status='pending', no token issued). */
   createPending: (payload: CreatePendingRequest): Promise<CreatePendingDeviceResponse> =>
-    apiClient.post('/enrollment/create', payload, createPendingDeviceResponseSchema),
+    apiClient.post('/enrollment/create', createPendingRequestSchema.parse(payload), createPendingDeviceResponseSchema),
 
   /** Update device fields (name, type). */
   updateDevice: (deviceId: string, updates: UpdateDeviceRequest): Promise<Device> =>
@@ -49,8 +50,8 @@ export const deviceService = {
   activateByMac: (deviceId: string, hardwareId: string): Promise<ActivationResponse> =>
     apiClient.post('/enrollment/activate-by-mac', { device_id: deviceId, hardware_id: hardwareId }, activationResponseSchema),
 
-  assign: (deviceId: string, groupId: string): Promise<Device> =>
-    apiClient.put(`/devices/${deviceId}/assign`, { group_id: groupId }, deviceSchema),
+  assign: (deviceId: string, groupId?: string): Promise<Device> =>
+    apiClient.put(`/devices/${deviceId}/assign`, { group_id: groupId ?? '' }, deviceSchema),
 
   /** Permanently delete a device. */
   deleteDevice: (deviceId: string): Promise<{ success: boolean }> =>

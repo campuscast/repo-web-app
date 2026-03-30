@@ -6,6 +6,7 @@ import {
   Download,
   FileAudio,
   FileVideo,
+  Info,
   Image,
   MoreHorizontal,
   Music,
@@ -25,7 +26,17 @@ import { hasRole } from '@/auth/guards';
 import { DataTable } from '@/components/common/data-table';
 import { EmptyState } from '@/components/common/empty-state';
 import { PageHeader } from '@/components/common/page-header';
-import { StatusBadge } from '@/components/common/status-badge';
+import { Badge } from '@/components/ui/badge';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle
+} from '@/components/ui/alert-dialog';
 import { Button } from '@/components/ui/button';
 import {
   Dialog,
@@ -83,6 +94,8 @@ const ACCEPTED_EXTENSIONS = [
   '.mp3', '.wav', '.aac', '.flac', '.ogg', '.aiff', '.alac', '.opus', '.wma'
 ].join(',');
 
+const ALL_ZONES_VALUE = '__all__';
+
 function assetPreviewUrl(asset: ContentAsset): string | null {
   if (!asset.storage_key) return null;
   return `${MINIO_PUBLIC_URL}/${MINIO_BUCKET}/${asset.storage_key}`;
@@ -116,6 +129,10 @@ function formatBytes(bytes: number): string {
   const sizes = ['B', 'KB', 'MB', 'GB'];
   const i = Math.floor(Math.log(bytes) / Math.log(k));
   return `${parseFloat((bytes / Math.pow(k, i)).toFixed(1))} ${sizes[i]}`;
+}
+
+function assetInfoQueryKey(assetId: string) {
+  return ['content', 'asset', assetId, 'info'] as const;
 }
 
 /* ─── Styled Media Player (video + audio) ───────────────────────── */
@@ -346,17 +363,20 @@ export function ContentManager() {
   const isAdmin = hasRole(roles, 'admin');
 
   const [selectedZoneId, setSelectedZoneId] = useState('');
+  const [tableZoneFilter, setTableZoneFilter] = useState(ALL_ZONES_VALUE);
   const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
   const [search, setSearch] = useState('');
-  const [statusFilter, setStatusFilter] = useState<'all' | 'ready' | 'uploading'>('all');
   const [page, setPage] = useState(1);
   const [isDragOver, setDragOver] = useState(false);
   const [uploadProgress, setUploadProgress] = useState<{ current: number; total: number } | null>(null);
 
   // Preview dialog state
   const [previewAsset, setPreviewAsset] = useState<ContentAsset | null>(null);
+  // Info dialog state
+  const [infoTarget, setInfoTarget] = useState<ContentAsset | null>(null);
   // Delete confirmation dialog state
   const [deleteTarget, setDeleteTarget] = useState<ContentAsset | null>(null);
+  const [orphanedDeleteTarget, setOrphanedDeleteTarget] = useState<ContentAsset | null>(null);
   // Rename dialog state
   const [renameTarget, setRenameTarget] = useState<ContentAsset | null>(null);
   const [renameValue, setRenameValue] = useState('');
@@ -370,23 +390,59 @@ export function ContentManager() {
     return isAdmin ? zones : zones.filter((zone) => allowedZones.includes(zone.zone_id));
   }, [allowedZones, isAdmin, zonesQuery.data]);
 
-  const effectiveZoneId = selectedZoneId || visibleZones[0]?.zone_id || '';
+  const visibleZoneIdSet = useMemo(
+    () => new Set(visibleZones.map((zone) => zone.zone_id)),
+    [visibleZones],
+  );
+  const zoneNameById = useMemo(
+    () => new Map(visibleZones.map((zone) => [zone.zone_id, zone.name])),
+    [visibleZones],
+  );
+
+  const effectiveZoneId = visibleZoneIdSet.has(selectedZoneId) ? selectedZoneId : '';
+  const effectiveTableZoneFilter =
+    tableZoneFilter === ALL_ZONES_VALUE || visibleZoneIdSet.has(tableZoneFilter)
+      ? tableZoneFilter
+      : ALL_ZONES_VALUE;
+  const listedZoneIds = useMemo(() => {
+    if (effectiveTableZoneFilter === ALL_ZONES_VALUE) {
+      return visibleZones.map((zone) => zone.zone_id);
+    }
+    return effectiveTableZoneFilter ? [effectiveTableZoneFilter] : [];
+  }, [effectiveTableZoneFilter, visibleZones]);
+  const contentQueryKey = listedZoneIds.length
+    ? ['content', 'zones', ...listedZoneIds]
+    : ['content', 'none'];
 
   const contentQuery = useQuery({
-    queryKey: effectiveZoneId ? queryKeys.content(effectiveZoneId) : ['content', 'none'],
-    queryFn: () => contentService.list(effectiveZoneId),
-    enabled: Boolean(effectiveZoneId)
+    queryKey: contentQueryKey,
+    queryFn: () => contentService.list(listedZoneIds),
+    enabled: listedZoneIds.length > 0,
   });
 
   const usageQuery = useQuery({
-    queryKey: effectiveZoneId ? queryKeys.scheduleUsage(effectiveZoneId) : ['schedule', 'usage', 'none'],
-    queryFn: () => scheduleService.getUsage(effectiveZoneId),
-    enabled: Boolean(effectiveZoneId)
+    queryKey: listedZoneIds.length ? ['schedule', 'usage', 'zones', ...listedZoneIds] : ['schedule', 'usage', 'none'],
+    queryFn: async () => {
+      const usages = await Promise.all(listedZoneIds.map((zoneId) => scheduleService.getUsage(zoneId)));
+      return usages.reduce<Record<string, number>>((accumulator, usage) => {
+        for (const [assetId, count] of Object.entries(usage.assets ?? {})) {
+          accumulator[assetId] = (accumulator[assetId] ?? 0) + count;
+        }
+        return accumulator;
+      }, {});
+    },
+    enabled: listedZoneIds.length > 0,
   });
 
   const usageCountMap = useMemo<Record<string, number>>(() => {
-    return usageQuery.data?.assets ?? {};
+    return usageQuery.data ?? {};
   }, [usageQuery.data]);
+
+  const infoQuery = useQuery({
+    queryKey: infoTarget ? assetInfoQueryKey(infoTarget.asset_id) : ['content', 'asset', 'none', 'info'],
+    queryFn: () => contentService.getInfo(infoTarget!.asset_id),
+    enabled: Boolean(infoTarget?.asset_id),
+  });
 
   /* ── Mutations ──────────────────────────────────────────── */
 
@@ -419,7 +475,7 @@ export function ContentManager() {
       setSelectedFiles([]);
       setUploadProgress(null);
       if (fileInputRef.current) fileInputRef.current.value = '';
-      await queryClient.invalidateQueries({ queryKey: queryKeys.content(effectiveZoneId) });
+      await queryClient.invalidateQueries({ queryKey: ['content'] });
       toast.success(`${count} asset${count > 1 ? 's' : ''} uploaded successfully`);
     },
     onError: (error) => {
@@ -434,7 +490,7 @@ export function ContentManager() {
     onSuccess: async () => {
       setRenameTarget(null);
       setRenameValue('');
-      await queryClient.invalidateQueries({ queryKey: queryKeys.content(effectiveZoneId) });
+      await queryClient.invalidateQueries({ queryKey: ['content'] });
       toast.success('File renamed');
     },
     onError: (error) => {
@@ -446,13 +502,49 @@ export function ContentManager() {
     mutationFn: (assetId: string) => contentService.deleteAsset(assetId),
     onSuccess: async () => {
       setDeleteTarget(null);
-      await queryClient.invalidateQueries({ queryKey: queryKeys.content(effectiveZoneId) });
+      setOrphanedDeleteTarget(null);
+      if (infoTarget) {
+        setInfoTarget(null);
+      }
+      await queryClient.invalidateQueries({ queryKey: ['content'] });
       toast.success('Asset deleted');
     },
     onError: (error) => {
       setDeleteTarget(null);
+      setOrphanedDeleteTarget(null);
       toast.error(error instanceof Error ? error.message : 'Delete failed');
     }
+  });
+
+  const availabilityMutation = useMutation({
+    mutationFn: ({ assetId, zoneIds }: { assetId: string; zoneIds: string[] }) =>
+      contentService.updateAvailability(assetId, zoneIds),
+    onSuccess: async (info, variables) => {
+      queryClient.setQueryData(assetInfoQueryKey(variables.assetId), info);
+      await queryClient.invalidateQueries({ queryKey: ['content'] });
+      if (info.asset.status === 'deleted') {
+        setInfoTarget(null);
+      }
+      toast.success('Zone availability updated');
+    },
+    onError: (error) => {
+      toast.error(error instanceof Error ? error.message : 'Availability update failed');
+    },
+  });
+
+  const pruneAvailabilityMutation = useMutation({
+    mutationFn: (assetId: string) => contentService.pruneUnusedAvailability(assetId),
+    onSuccess: async (info, assetId) => {
+      queryClient.setQueryData(assetInfoQueryKey(assetId), info);
+      await queryClient.invalidateQueries({ queryKey: ['content'] });
+      if (info.asset.status === 'deleted') {
+        setInfoTarget(null);
+      }
+      toast.success('Unused zone access removed');
+    },
+    onError: (error) => {
+      toast.error(error instanceof Error ? error.message : 'Failed to remove unused zone access');
+    },
   });
 
   /* ── Handlers ───────────────────────────────────────────── */
@@ -502,15 +594,48 @@ export function ContentManager() {
     document.body.removeChild(a);
   }, []);
 
+  const handleZoneAvailabilityToggle = useCallback((zoneId: string) => {
+    const info = infoQuery.data;
+    if (!info) return;
+
+    const currentZoneIds = info.asset.zone_ids;
+    const nextZoneIds = currentZoneIds.includes(zoneId)
+      ? currentZoneIds.filter((currentZoneId) => currentZoneId !== zoneId)
+      : [...currentZoneIds, zoneId];
+
+    if (nextZoneIds.length === 0) {
+      setOrphanedDeleteTarget(info.asset);
+      return;
+    }
+
+    availabilityMutation.mutate({
+      assetId: info.asset.asset_id,
+      zoneIds: nextZoneIds,
+    });
+  }, [availabilityMutation, infoQuery.data]);
+
+  const handlePruneAvailability = useCallback(() => {
+    const info = infoQuery.data;
+    if (!info) return;
+
+    const availableZoneIds = info.asset.zone_ids;
+    const wouldRemoveAllZones =
+      availableZoneIds.length > 0 &&
+      availableZoneIds.every((zoneId) => info.unused_zone_ids.includes(zoneId));
+
+    if (wouldRemoveAllZones) {
+      setOrphanedDeleteTarget(info.asset);
+      return;
+    }
+
+    pruneAvailabilityMutation.mutate(info.asset.asset_id);
+  }, [infoQuery.data, pruneAvailabilityMutation]);
+
   const filtered = useMemo(() => {
     const rows = contentQuery.data ?? [];
     const lowered = search.toLowerCase();
-    return rows.filter((asset) => {
-      const matchSearch = asset.filename.toLowerCase().includes(lowered);
-      const matchStatus = statusFilter === 'all' || asset.status === statusFilter;
-      return matchSearch && matchStatus;
-    });
-  }, [contentQuery.data, search, statusFilter]);
+    return rows.filter((asset) => asset.filename.toLowerCase().includes(lowered));
+  }, [contentQuery.data, search]);
 
   const pageSize = 10;
   const total = filtered.length;
@@ -519,30 +644,7 @@ export function ContentManager() {
   return (
     <TooltipProvider>
       <div className="space-y-4">
-        <PageHeader description="Медиатека, upload flow и контроль READY/DRAFT статусов" />
-
-        {/* Zone selector */}
-        <div className="flex items-center gap-3">
-          <Label className="shrink-0 text-sm font-medium">Zone</Label>
-          <Select
-            value={effectiveZoneId}
-            onValueChange={(value) => {
-              setSelectedZoneId(value);
-              setPage(1);
-            }}
-          >
-            <SelectTrigger className="w-[220px]">
-              <SelectValue placeholder="Select zone" />
-            </SelectTrigger>
-            <SelectContent>
-              {visibleZones.map((zone) => (
-                <SelectItem key={zone.zone_id} value={zone.zone_id}>
-                  {zone.name}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
+        <PageHeader description="Медиатека, upload flow и управление доступностью ассетов по зонам" />
 
         {/* Two-panel grid */}
         <div className="grid gap-4 lg:grid-cols-[280px_1fr]">
@@ -577,6 +679,29 @@ export function ContentManager() {
               accept={ACCEPTED_EXTENSIONS}
               onChange={handleFileInputChange}
             />
+
+            <div className="flex items-center gap-2">
+              <Label htmlFor="content-upload-zone" className="shrink-0 text-sm font-medium">
+                Target
+              </Label>
+              <Select
+                value={effectiveZoneId}
+                onValueChange={(value) => {
+                  setSelectedZoneId(value);
+                }}
+              >
+                <SelectTrigger id="content-upload-zone" className="h-9 flex-1">
+                  <SelectValue placeholder="Select zone" />
+                </SelectTrigger>
+                <SelectContent>
+                  {visibleZones.map((zone) => (
+                    <SelectItem key={zone.zone_id} value={zone.zone_id}>
+                      {zone.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
 
             {/* Selected files list */}
             {selectedFiles.length > 0 && (
@@ -620,168 +745,209 @@ export function ContentManager() {
           </div>
 
           {/* Content table */}
-          <DataTable
-            total={total}
-            page={page}
-            pageSize={pageSize}
-            onPageChange={setPage}
-            toolbar={
-              <div className="flex flex-wrap items-center gap-2">
-                <div className="flex items-center gap-1.5">
-                  <span className="shrink-0 text-sm text-muted-foreground">Status:</span>
-                  <Select
-                    value={statusFilter}
-                    onValueChange={(value) => setStatusFilter(value as typeof statusFilter)}
-                  >
-                    <SelectTrigger className="w-[150px]">
-                      <SelectValue placeholder="Status" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="all">All statuses</SelectItem>
-                      <SelectItem value="ready">Ready</SelectItem>
-                      <SelectItem value="uploading">Uploading</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="relative w-[260px]">
-                  <Search className="pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-                  <Input
-                    value={search}
-                    onChange={(event) => {
-                      setSearch(event.target.value);
-                      setPage(1);
-                    }}
-                    placeholder="Search file"
-                    className="pl-8"
-                  />
-                </div>
-              </div>
-            }
-          >
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead className="pl-4">Filename</TableHead>
-                  <TableHead>Status</TableHead>
-                  <TableHead>Type</TableHead>
-                  <TableHead className="text-center">Used in</TableHead>
-                  <TableHead className="w-[52px]" />
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {contentQuery.isLoading
-                  ? Array.from({ length: 6 }).map((_, index) => (
-                      <TableRow key={index}>
-                        <TableCell colSpan={5}>
-                          <Skeleton className="h-8 w-full" />
-                        </TableCell>
-                      </TableRow>
-                    ))
-                  : paged.map((asset) => {
-                      const usageCount = usageCountMap[asset.asset_id] ?? 0;
-                      const isUsed = usageCount > 0;
+          <div className="flex flex-col gap-3">
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+              <Select
+                value={effectiveTableZoneFilter}
+                onValueChange={(value) => {
+                  setTableZoneFilter(value);
+                  setPage(1);
+                }}
+              >
+                <SelectTrigger className="h-8 w-full sm:w-[220px]">
+                  <SelectValue placeholder="Zone" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value={ALL_ZONES_VALUE}>All zones</SelectItem>
+                  {visibleZones.map((zone) => (
+                    <SelectItem key={zone.zone_id} value={zone.zone_id}>
+                      {zone.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
 
-                      return (
-                        <TableRow key={asset.asset_id}>
-                          <TableCell className="pl-4">
-                            <span className="font-medium">{asset.filename}</span>
-                          </TableCell>
-                          <TableCell>
-                            <StatusBadge
-                              tone={asset.status === 'ready' ? 'success' : 'warning'}
-                              label={asset.status.toUpperCase()}
-                            />
-                          </TableCell>
-                          <TableCell className="text-sm text-muted-foreground">{asset.content_type}</TableCell>
-                          <TableCell className="text-center">
-                            {isUsed ? (
-                              <span className="inline-flex items-center justify-center rounded-full bg-primary/10 px-2 py-0.5 text-xs font-semibold text-primary tabular-nums">
-                                {usageCount}
-                              </span>
-                            ) : (
-                              <span className="text-xs text-muted-foreground">—</span>
-                            )}
-                          </TableCell>
-                          <TableCell>
-                            <DropdownMenu>
-                              <DropdownMenuTrigger asChild>
-                                <Button variant="ghost" size="icon">
-                                  <MoreHorizontal className="size-4" />
-                                </Button>
-                              </DropdownMenuTrigger>
-                              <DropdownMenuContent align="end">
-                                <DropdownMenuItem onClick={() => setPreviewAsset(asset)}>
-                                  {mediaCategoryIcon(asset.content_type)}
-                                  Preview
-                                </DropdownMenuItem>
-
-                                <DropdownMenuItem onClick={() => handleDownload(asset)}>
-                                  <Download className="mr-2 size-4" />
-                                  Download
-                                </DropdownMenuItem>
-
-                                {isUsed ? (
-                                  <Tooltip>
-                                    <TooltipTrigger asChild>
-                                      <DropdownMenuItem disabled>
-                                        <Pencil className="mr-2 size-4" />
-                                        Rename
-                                      </DropdownMenuItem>
-                                    </TooltipTrigger>
-                                    <TooltipContent side="left">
-                                      Used in {usageCount} schedule slot{usageCount > 1 ? 's' : ''} — cannot rename
-                                    </TooltipContent>
-                                  </Tooltip>
-                                ) : (
-                                  <DropdownMenuItem onClick={() => openRenameDialog(asset)}>
-                                    <Pencil className="mr-2 size-4" />
-                                    Rename
-                                  </DropdownMenuItem>
-                                )}
-
-                                <DropdownMenuSeparator />
-
-                                {isUsed ? (
-                                  <Tooltip>
-                                    <TooltipTrigger asChild>
-                                      <DropdownMenuItem disabled className="text-destructive">
-                                        <Trash2 className="mr-2 size-4" />
-                                        Delete
-                                      </DropdownMenuItem>
-                                    </TooltipTrigger>
-                                    <TooltipContent side="left">
-                                      Used in {usageCount} schedule slot{usageCount > 1 ? 's' : ''} — cannot delete
-                                    </TooltipContent>
-                                  </Tooltip>
-                                ) : (
-                                  <DropdownMenuItem
-                                    className="text-destructive focus:text-destructive"
-                                    onClick={() => setDeleteTarget(asset)}
-                                  >
-                                    <Trash2 className="mr-2 size-4" />
-                                    Delete
-                                  </DropdownMenuItem>
-                                )}
-                              </DropdownMenuContent>
-                            </DropdownMenu>
-                          </TableCell>
-                        </TableRow>
-                      );
-                    })}
-              </TableBody>
-            </Table>
-
-            {!contentQuery.isLoading && !total ? (
-              <div className="p-4">
-                <EmptyState
-                  title="No content assets"
-                  description="Загрузите первый медиафайл в выбранную зону."
-                  actionLabel={selectedFiles.length > 0 ? 'Upload now' : undefined}
-                  onAction={selectedFiles.length > 0 ? () => uploadMutation.mutate() : undefined}
+              <div className="relative w-full max-w-md">
+                <Search className="pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+                <Input
+                  value={search}
+                  onChange={(event) => {
+                    setSearch(event.target.value);
+                    setPage(1);
+                  }}
+                  placeholder="Search file"
+                  className="h-8 pl-8"
                 />
               </div>
-            ) : null}
-          </DataTable>
+            </div>
+
+            <DataTable
+              total={total}
+              page={page}
+              pageSize={pageSize}
+              onPageChange={setPage}
+            >
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead className="pl-4">Filename</TableHead>
+                    <TableHead>Zone</TableHead>
+                    <TableHead>Type</TableHead>
+                    <TableHead className="text-center">Used in</TableHead>
+                    <TableHead className="w-[52px]" />
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {contentQuery.isLoading
+                    ? Array.from({ length: 6 }).map((_, index) => (
+                        <TableRow key={index}>
+                          <TableCell colSpan={5}>
+                            <Skeleton className="h-8 w-full" />
+                          </TableCell>
+                        </TableRow>
+                      ))
+                    : paged.map((asset) => {
+                        const usageCount = usageCountMap[asset.asset_id] ?? 0;
+                        const isUsed = usageCount > 0;
+                        const zoneBadges = (asset.zone_ids.length > 0 ? asset.zone_ids : [asset.zone_id])
+                          .filter(Boolean)
+                          .map((zoneId) => ({
+                            zoneId,
+                            label: zoneNameById.get(zoneId) ?? zoneId,
+                          }));
+                        const hasScopedAwayZones = asset.zone_ids.some((zoneId) => !visibleZoneIdSet.has(zoneId));
+                        const renameBlockedReason = hasScopedAwayZones
+                          ? 'Shared with zones outside your access scope — cannot rename'
+                          : isUsed
+                            ? `Used in ${usageCount} schedule slot${usageCount > 1 ? 's' : ''} — cannot rename`
+                            : '';
+                        const deleteBlockedReason = hasScopedAwayZones
+                          ? 'Shared with zones outside your access scope — cannot delete'
+                          : isUsed
+                            ? `Used in ${usageCount} schedule slot${usageCount > 1 ? 's' : ''} — cannot delete`
+                            : '';
+
+                        return (
+                          <TableRow key={asset.asset_id}>
+                            <TableCell className="pl-4">
+                              <div className="space-y-1">
+                                <span className="font-medium">{asset.filename}</span>
+                                {asset.status !== 'ready' ? (
+                                  <div className="text-xs uppercase tracking-wide text-muted-foreground">
+                                    {asset.status}
+                                  </div>
+                                ) : null}
+                              </div>
+                            </TableCell>
+                            <TableCell>
+                              <div className="flex flex-wrap gap-1">
+                                {zoneBadges.length > 0 ? (
+                                  zoneBadges.map((zone) => (
+                                    <Badge key={`${asset.asset_id}-${zone.zoneId}`} variant="outline">
+                                      {zone.label}
+                                    </Badge>
+                                  ))
+                                ) : (
+                                  <span className="text-xs text-muted-foreground">—</span>
+                                )}
+                              </div>
+                            </TableCell>
+                            <TableCell className="text-sm text-muted-foreground">{asset.content_type}</TableCell>
+                            <TableCell className="text-center">
+                              {isUsed ? (
+                                <span className="inline-flex items-center justify-center rounded-full bg-primary/10 px-2 py-0.5 text-xs font-semibold text-primary tabular-nums">
+                                  {usageCount}
+                                </span>
+                              ) : (
+                                <span className="text-xs text-muted-foreground">—</span>
+                              )}
+                            </TableCell>
+                            <TableCell>
+                              <DropdownMenu>
+                                <DropdownMenuTrigger asChild>
+                                  <Button variant="ghost" size="icon">
+                                    <MoreHorizontal className="size-4" />
+                                  </Button>
+                                </DropdownMenuTrigger>
+                                <DropdownMenuContent align="end">
+                                  <DropdownMenuItem onClick={() => setPreviewAsset(asset)}>
+                                    {mediaCategoryIcon(asset.content_type)}
+                                    Preview
+                                  </DropdownMenuItem>
+
+                                  <DropdownMenuItem onClick={() => setInfoTarget(asset)}>
+                                    <Info className="mr-2 size-4" />
+                                    Info
+                                  </DropdownMenuItem>
+
+                                  <DropdownMenuItem onClick={() => handleDownload(asset)}>
+                                    <Download className="mr-2 size-4" />
+                                    Download
+                                  </DropdownMenuItem>
+
+                                  {renameBlockedReason ? (
+                                    <Tooltip>
+                                      <TooltipTrigger asChild>
+                                        <DropdownMenuItem disabled>
+                                          <Pencil className="mr-2 size-4" />
+                                          Rename
+                                        </DropdownMenuItem>
+                                      </TooltipTrigger>
+                                      <TooltipContent side="left">{renameBlockedReason}</TooltipContent>
+                                    </Tooltip>
+                                  ) : (
+                                    <DropdownMenuItem onClick={() => openRenameDialog(asset)}>
+                                      <Pencil className="mr-2 size-4" />
+                                      Rename
+                                    </DropdownMenuItem>
+                                  )}
+
+                                  <DropdownMenuSeparator />
+
+                                  {deleteBlockedReason ? (
+                                    <Tooltip>
+                                      <TooltipTrigger asChild>
+                                        <DropdownMenuItem disabled className="text-destructive">
+                                          <Trash2 className="mr-2 size-4" />
+                                          Delete
+                                        </DropdownMenuItem>
+                                      </TooltipTrigger>
+                                      <TooltipContent side="left">{deleteBlockedReason}</TooltipContent>
+                                    </Tooltip>
+                                  ) : (
+                                    <DropdownMenuItem
+                                      className="text-destructive focus:text-destructive"
+                                      onClick={() => setDeleteTarget(asset)}
+                                    >
+                                      <Trash2 className="mr-2 size-4" />
+                                      Delete
+                                    </DropdownMenuItem>
+                                  )}
+                                </DropdownMenuContent>
+                              </DropdownMenu>
+                            </TableCell>
+                          </TableRow>
+                        );
+                      })}
+                </TableBody>
+              </Table>
+
+              {!contentQuery.isLoading && !total ? (
+                <div className="p-4">
+                  <EmptyState
+                    title="No content assets"
+                    description={
+                      effectiveTableZoneFilter === ALL_ZONES_VALUE
+                        ? 'Во всех доступных зонах пока нет медиафайлов.'
+                        : 'Загрузите первый медиафайл в выбранную зону.'
+                    }
+                    actionLabel={selectedFiles.length > 0 ? 'Upload now' : undefined}
+                    onAction={selectedFiles.length > 0 ? () => uploadMutation.mutate() : undefined}
+                  />
+                </div>
+              ) : null}
+            </DataTable>
+          </div>
         </div>
 
         {/* ── Preview dialog ─────────────────────────────────── */}
@@ -794,7 +960,12 @@ export function ContentManager() {
                   <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs">
                     <span>{previewAsset.content_type}</span>
                     <span>{formatBytes(previewAsset.file_size)}</span>
-                    <span className="uppercase">{previewAsset.status}</span>
+                    <span>
+                      Zones:{' '}
+                      {(previewAsset.zone_ids.length > 0 ? previewAsset.zone_ids : [previewAsset.zone_id])
+                        .map((zoneId) => zoneNameById.get(zoneId) ?? zoneId)
+                        .join(', ')}
+                    </span>
                   </div>
                 </DialogDescription>
               </DialogHeader>
@@ -833,6 +1004,180 @@ export function ContentManager() {
                   );
                 })()}
               </div>
+            </DialogContent>
+          </Dialog>
+        )}
+
+        {/* ── Info dialog ─────────────────────────────────────── */}
+        {infoTarget && (
+          <Dialog
+            open
+            onOpenChange={(open) => {
+              if (!open && !availabilityMutation.isPending && !pruneAvailabilityMutation.isPending) {
+                setInfoTarget(null);
+              }
+            }}
+          >
+            <DialogContent className="sm:max-w-3xl">
+              <DialogHeader>
+                <DialogTitle className="truncate">{infoQuery.data?.asset.filename ?? infoTarget.filename}</DialogTitle>
+                <DialogDescription asChild>
+                  <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs">
+                    <span>{infoQuery.data?.asset.content_type ?? infoTarget.content_type}</span>
+                    <span>{formatBytes(infoQuery.data?.asset.file_size ?? infoTarget.file_size)}</span>
+                    <span className="uppercase">{infoQuery.data?.asset.status ?? infoTarget.status}</span>
+                  </div>
+                </DialogDescription>
+              </DialogHeader>
+
+              {infoQuery.isLoading ? (
+                <div className="space-y-3">
+                  <Skeleton className="h-20 w-full" />
+                  <Skeleton className="h-48 w-full" />
+                </div>
+              ) : infoQuery.isError ? (
+                <div className="rounded-md border border-destructive/30 bg-destructive/5 p-4 text-sm text-destructive">
+                  {infoQuery.error instanceof Error ? infoQuery.error.message : 'Failed to load asset info'}
+                </div>
+              ) : infoQuery.data ? (
+                (() => {
+                  const asset = infoQuery.data.asset;
+                  const usageByZone = new Map(
+                    infoQuery.data.usage_by_zone.map((entry) => [entry.zone_id, entry.publication_count]),
+                  );
+                  const visibleZoneIds = new Set(visibleZones.map((zone) => zone.zone_id));
+                  const hiddenZoneIds = asset.zone_ids.filter((zoneId) => !visibleZoneIds.has(zoneId));
+                  const hasScopedAwayZones = hiddenZoneIds.length > 0;
+                  const canManageAvailability = asset.status === 'ready' && !hasScopedAwayZones;
+                  const availabilityRows = [
+                    ...visibleZones.map((zone) => ({
+                      zone_id: zone.zone_id,
+                      label: zone.name,
+                      available: asset.zone_ids.includes(zone.zone_id),
+                      publication_count: usageByZone.get(zone.zone_id) ?? 0,
+                      locked: false,
+                    })),
+                    ...hiddenZoneIds.map((zoneId) => ({
+                      zone_id: zoneId,
+                      label: zoneNameById.get(zoneId) ?? zoneId,
+                      available: true,
+                      publication_count: usageByZone.get(zoneId) ?? 0,
+                      locked: true,
+                    })),
+                  ];
+
+                  return (
+                    <div className="space-y-4">
+                      <div className="grid gap-4 rounded-md border p-4 md:grid-cols-[minmax(0,1fr)_auto]">
+                        <div className="space-y-2">
+                          <div className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                            Available in zones
+                          </div>
+                          <div className="flex flex-wrap gap-2">
+                            {asset.zone_ids.length > 0 ? (
+                              asset.zone_ids.map((zoneId) => (
+                                <Badge key={`${asset.asset_id}-${zoneId}`} variant="outline">
+                                  {zoneNameById.get(zoneId) ?? zoneId}
+                                </Badge>
+                              ))
+                            ) : (
+                              <span className="text-sm text-muted-foreground">This asset is not available in any zone.</span>
+                            )}
+                          </div>
+                          <div className="text-xs text-muted-foreground">
+                            Origin zone: {(zoneNameById.get(asset.zone_id) ?? asset.zone_id) || '—'}
+                          </div>
+                        </div>
+
+                        <Button
+                          variant="outline"
+                          onClick={handlePruneAvailability}
+                          disabled={
+                            pruneAvailabilityMutation.isPending ||
+                            !canManageAvailability ||
+                            infoQuery.data.unused_zone_ids.length === 0
+                          }
+                        >
+                          {pruneAvailabilityMutation.isPending ? 'Removing...' : 'Remove unused zone access'}
+                        </Button>
+                      </div>
+
+                      {asset.status !== 'ready' ? (
+                        <p className="rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
+                          Availability can be changed after the upload finishes.
+                        </p>
+                      ) : null}
+
+                      {hasScopedAwayZones ? (
+                        <p className="rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
+                          This asset is shared with zones outside your current access scope. Availability changes are
+                          disabled until you have access to all of its zones.
+                        </p>
+                      ) : null}
+
+                      <div className="rounded-md border">
+                        <Table>
+                          <TableHeader>
+                            <TableRow>
+                              <TableHead>Zone</TableHead>
+                              <TableHead>Availability</TableHead>
+                              <TableHead>Used in publications</TableHead>
+                              <TableHead className="text-right">Action</TableHead>
+                            </TableRow>
+                          </TableHeader>
+                          <TableBody>
+                            {availabilityRows.map((row) => {
+                              const actionDisabled =
+                                row.locked ||
+                                asset.status !== 'ready' ||
+                                (row.available && row.publication_count > 0) ||
+                                availabilityMutation.isPending ||
+                                pruneAvailabilityMutation.isPending;
+                              const actionLabel = row.locked
+                                ? 'Locked'
+                                : row.available
+                                  ? row.publication_count > 0
+                                    ? 'In use'
+                                    : 'Remove access'
+                                  : 'Make available';
+
+                              return (
+                                <TableRow key={`${asset.asset_id}-${row.zone_id}`}>
+                                  <TableCell className="font-medium">{row.label}</TableCell>
+                                  <TableCell>
+                                    <Badge variant={row.available ? 'default' : 'secondary'}>
+                                      {row.available ? 'Available' : 'Not available'}
+                                    </Badge>
+                                  </TableCell>
+                                  <TableCell>
+                                    {row.publication_count > 0 ? (
+                                      <span className="inline-flex items-center justify-center rounded-full bg-primary/10 px-2 py-0.5 text-xs font-semibold text-primary tabular-nums">
+                                        {row.publication_count}
+                                      </span>
+                                    ) : (
+                                      <span className="text-xs text-muted-foreground">—</span>
+                                    )}
+                                  </TableCell>
+                                  <TableCell className="text-right">
+                                    <Button
+                                      variant="outline"
+                                      size="sm"
+                                      disabled={actionDisabled}
+                                      onClick={() => handleZoneAvailabilityToggle(row.zone_id)}
+                                    >
+                                      {actionLabel}
+                                    </Button>
+                                  </TableCell>
+                                </TableRow>
+                              );
+                            })}
+                          </TableBody>
+                        </Table>
+                      </div>
+                    </div>
+                  );
+                })()
+              ) : null}
             </DialogContent>
           </Dialog>
         )}
@@ -913,7 +1258,7 @@ export function ContentManager() {
                 </DialogTitle>
                 <DialogDescription>
                   <span className="font-medium text-foreground">{deleteTarget.filename}</span> will be permanently
-                  removed from the system. This action cannot be undone.
+                  removed from the content library and deleted from storage. This action cannot be undone.
                 </DialogDescription>
               </DialogHeader>
               <DialogFooter className="gap-2">
@@ -935,6 +1280,40 @@ export function ContentManager() {
               </DialogFooter>
             </DialogContent>
           </Dialog>
+        )}
+
+        {orphanedDeleteTarget && (
+          <AlertDialog
+            open
+            onOpenChange={(open) => {
+              if (!open && !deleteMutation.isPending) {
+                setOrphanedDeleteTarget(null);
+              }
+            }}
+          >
+            <AlertDialogContent>
+              <AlertDialogHeader>
+                <AlertDialogTitle>No zones will remain</AlertDialogTitle>
+                <AlertDialogDescription>
+                  <span className="font-medium text-foreground">{orphanedDeleteTarget.filename}</span> would no longer
+                  be available in any zone. You can cancel and keep at least one zone, or delete the asset permanently
+                  from the content library and storage.
+                </AlertDialogDescription>
+              </AlertDialogHeader>
+              <AlertDialogFooter>
+                <AlertDialogCancel disabled={deleteMutation.isPending}>Cancel</AlertDialogCancel>
+                <AlertDialogAction
+                  onClick={(event) => {
+                    event.preventDefault();
+                    deleteMutation.mutate(orphanedDeleteTarget.asset_id);
+                  }}
+                  disabled={deleteMutation.isPending}
+                >
+                  {deleteMutation.isPending ? 'Deleting...' : 'Delete asset'}
+                </AlertDialogAction>
+              </AlertDialogFooter>
+            </AlertDialogContent>
+          </AlertDialog>
         )}
       </div>
     </TooltipProvider>

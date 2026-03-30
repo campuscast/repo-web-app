@@ -30,7 +30,7 @@ export function DataTable({
   const pageCount = Math.max(1, Math.ceil(total / pageSize));
 
   return (
-    <Card className={cn('overflow-hidden', className)}>
+    <Card className={cn('gap-0 py-0 overflow-hidden', className)}>
       {toolbar ? <div className="border-b px-4 py-2">{toolbar}</div> : null}
       <CardContent className="p-0">{children}</CardContent>
       <div className="flex items-center justify-between border-t px-4 py-3 text-sm">

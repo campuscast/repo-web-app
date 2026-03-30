@@ -79,7 +79,7 @@ export function ReleaseDetailsPage({ releaseId }: ReleaseDetailsPageProps) {
               <InfoLine label="Published at" value={new Date(release.published_at).toLocaleString()} />
               <InfoLine
                 label="Target groups"
-                value={release.target_group_ids.length ? release.target_group_ids.join(', ') : 'all groups'}
+                value={release.target_group_ids.length ? release.target_group_ids.join(', ') : 'all devices in zone'}
               />
               <InfoLine label="Manifest present" value={release.manifest_present ? 'yes' : 'no'} />
             </>

@@ -1,5 +1,10 @@
 import { z } from 'zod';
 
+const nullableStringToEmpty = z.preprocess(
+  (value) => (value == null ? '' : value),
+  z.string(),
+);
+
 export const paginationSchema = z.object({
   total: z.number().int().nonnegative().default(0),
   page: z.number().int().nonnegative().default(1),
@@ -113,6 +118,7 @@ export const screenGroupSchema = z.object({
   group_id: z.string(),
   zone_id: z.string(),
   name: z.string(),
+  description: nullableStringToEmpty.default(''),
   created_at: z.string().default('')
 });
 
@@ -139,7 +145,7 @@ export const deviceSchema = z.object({
   device_name: z.string(),
   device_type: z.string(),
   zone_id: z.string(),
-  group_id: z.string(),
+  group_id: nullableStringToEmpty.default(''),
   status: z.enum(['pending', 'active', 'revoked', 'offline']),
   hardware_id: z.string().nullable().optional(),
   mqtt_client_id: z.string().nullable().optional(),
@@ -152,13 +158,13 @@ export const registerDeviceRequestSchema = z.object({
   device_type: z.enum(['android_tv', 'desktop', 'web']),
   hardware_id: z.string().optional(),
   zone_id: z.string().min(1),
-  group_id: z.string().min(1)
+  group_id: nullableStringToEmpty.default('')
 });
 
 export const createPendingRequestSchema = z.object({
   device_name: z.string().min(1),
   zone_id: z.string().min(1),
-  group_id: z.string().min(1),
+  group_id: nullableStringToEmpty.default(''),
   hardware_id: z.string().optional()
 });
 
@@ -203,21 +209,36 @@ export const initUploadResponseSchema = z.object({
 
 export const contentAssetSchema = z.object({
   asset_id: z.string(),
-  zone_id: z.string(),
+  zone_id: z.string().default(''),
+  zone_ids: z.array(z.string()).default([]),
   filename: z.string(),
   content_type: z.string(),
   // TypeORM returns bigint columns as strings — coerce to number
   file_size: z.coerce.number().int().nonnegative(),
-  sha256_hash: z.string(),
+  sha256_hash: nullableStringToEmpty.default(''),
   status: z.enum(['uploading', 'ready', 'deleted']),
-  storage_key: z.string().default(''),
-  signature: z.string().default(''),
-  key_id: z.string().default('')
+  storage_key: nullableStringToEmpty.default(''),
+  signature: nullableStringToEmpty.default(''),
+  key_id: nullableStringToEmpty.default(''),
+  metadata: z.record(z.string(), z.unknown()).default({}),
+  created_at: z.string().nullable().default(null),
+  updated_at: z.string().nullable().default(null),
 });
 
 export const contentListResponseSchema = z.object({
   data: z.array(contentAssetSchema).default([]),
   pagination: paginationSchema.default({ total: 0, page: 1, page_size: 20 })
+});
+
+export const contentAssetUsageByZoneSchema = z.object({
+  zone_id: z.string(),
+  publication_count: z.number().int().nonnegative().default(0),
+});
+
+export const contentAssetInfoSchema = z.object({
+  asset: contentAssetSchema,
+  usage_by_zone: z.array(contentAssetUsageByZoneSchema).default([]),
+  unused_zone_ids: z.array(z.string()).default([]),
 });
 
 export const publicationTransitionSchema = z.object({
@@ -300,7 +321,13 @@ export const scheduleSchema = z.object({
   name: z.string(),
   status: z.enum(['draft', 'locked', 'published']),
   current_version: z.number().int().default(1),
-  slots: z.array(scheduleSlotSchema).default([])
+  slots: z.array(scheduleSlotSchema).default([]),
+  locked_by: z.preprocess((value) => (value == null ? '' : value), z.string()),
+  lock_token: z.preprocess((value) => (value == null ? '' : value), z.string()),
+  lock_expires_at: z.preprocess((value) => (value == null ? '' : value), z.string()),
+  is_locked: z.boolean().default(false),
+  has_releases: z.boolean().default(false),
+  last_published_at: z.string().default(''),
 });
 
 export const schedulesListResponseSchema = z.object({
@@ -358,6 +385,13 @@ export const lockResponseSchema = z.object({
   lock_token: z.string().default(''),
   locked_by: z.string().default(''),
   expires_at: z.string().default('')
+});
+
+export const lockRefreshResponseSchema = z.object({
+  refreshed: z.boolean(),
+  lock_token: z.string().default(''),
+  locked_by: z.string().default(''),
+  expires_at: z.string().default(''),
 });
 
 export const scheduleOpSchema = z.object({
@@ -513,6 +547,7 @@ export type ActivationResponse = z.infer<typeof activationResponseSchema>;
 export type InitUploadRequest = z.infer<typeof initUploadRequestSchema>;
 export type InitUploadResponse = z.infer<typeof initUploadResponseSchema>;
 export type ContentAsset = z.infer<typeof contentAssetSchema>;
+export type ContentAssetInfo = z.infer<typeof contentAssetInfoSchema>;
 export type PublicationItem = z.infer<typeof publicationItemSchema>;
 export type Publication = z.infer<typeof publicationSchema>;
 export type Schedule = z.infer<typeof scheduleSchema>;
@@ -526,6 +561,7 @@ export type ScheduleOp = z.infer<typeof scheduleOpSchema>;
 export type SignedScheduleOp = z.infer<typeof signedScheduleOpSchema>;
 export type IngestOpsResponse = z.infer<typeof ingestOpsResponseSchema>;
 export type LockResponse = z.infer<typeof lockResponseSchema>;
+export type LockRefreshResponse = z.infer<typeof lockRefreshResponseSchema>;
 export type ValidationIssue = z.infer<typeof validationIssueSchema>;
 export type ValidationResult = z.infer<typeof validationResultSchema>;
 export type PublishResponse = z.infer<typeof publishResponseSchema>;

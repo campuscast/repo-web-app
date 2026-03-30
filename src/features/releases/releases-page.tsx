@@ -256,7 +256,7 @@ export function ReleasesPage() {
                     </TableCell>
                     <TableCell>v{release.version_number}</TableCell>
                     <TableCell className="text-xs">
-                      {release.target_group_ids.length ? release.target_group_ids.join(', ') : 'all groups'}
+                      {release.target_group_ids.length ? release.target_group_ids.join(', ') : 'all devices in zone'}
                     </TableCell>
                     <TableCell>
                       <StatusBadge

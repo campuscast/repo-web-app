@@ -47,11 +47,13 @@ import type { CreatePendingRequest, ActivationResponse } from '@/types/api';
 
 /* ─── Schemas ───────────────────────────────────────────────────── */
 
+const NO_GROUP_VALUE = '__no_group__';
+
 const createPlayerSchema = z.object({
   device_name: z.string().min(2, 'Minimum 2 characters'),
   hardware_id: z.string().optional(),
   zone_id: z.string().min(1, 'Select a zone'),
-  group_id: z.string().min(1, 'Select a screen group')
+  group_id: z.string()
 });
 
 type CreatePlayerForm = z.infer<typeof createPlayerSchema>;
@@ -192,7 +194,7 @@ function StepCreatePlayer({
           )}
         </div>
 
-        <div className="space-y-2">
+        <div className="min-w-0 space-y-2">
           <Label>Zone <span className="text-destructive">*</span></Label>
           <Select
             value={selectedZoneId}
@@ -201,7 +203,7 @@ function StepCreatePlayer({
               form.setValue('group_id', '', { shouldValidate: true });
             }}
           >
-            <SelectTrigger><SelectValue placeholder="Select zone" /></SelectTrigger>
+            <SelectTrigger className="w-full"><SelectValue placeholder="Select zone" /></SelectTrigger>
             <SelectContent>
               {visibleZones.map((zone) => (
                 <SelectItem key={zone.zone_id} value={zone.zone_id}>{zone.name}</SelectItem>
@@ -213,23 +215,21 @@ function StepCreatePlayer({
           )}
         </div>
 
-        <div className="space-y-2">
-          <Label>Screen group <span className="text-destructive">*</span></Label>
+        <div className="min-w-0 space-y-2">
+          <Label>Screen group <span className="text-xs font-normal text-muted-foreground">(optional)</span></Label>
           <Select
-            value={form.watch('group_id')}
-            onValueChange={(value) => form.setValue('group_id', value, { shouldValidate: true })}
+            value={selectedZoneId ? (form.watch('group_id') || NO_GROUP_VALUE) : ''}
+            onValueChange={(value) => form.setValue('group_id', value === NO_GROUP_VALUE ? '' : value, { shouldValidate: true })}
             disabled={!selectedZoneId}
           >
-            <SelectTrigger><SelectValue placeholder="Select group" /></SelectTrigger>
+            <SelectTrigger className="w-full"><SelectValue placeholder="Select group" /></SelectTrigger>
             <SelectContent>
+              <SelectItem value={NO_GROUP_VALUE}>No group</SelectItem>
               {(groupsQuery.data ?? []).map((group) => (
                 <SelectItem key={group.group_id} value={group.group_id}>{group.name}</SelectItem>
               ))}
             </SelectContent>
           </Select>
-          {form.formState.errors.group_id && (
-            <p className="text-xs text-destructive">{form.formState.errors.group_id.message}</p>
-          )}
         </div>
 
         <div className="space-y-2">

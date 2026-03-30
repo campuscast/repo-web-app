@@ -27,6 +27,7 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
 import { useLocale } from '@/hooks/use-locale';
+import { createClientId } from '@/lib/id';
 import { cn } from '@/lib/utils';
 import { contentService } from '@/services/content-service';
 import { publicationService } from '@/services/publication-service';
@@ -105,11 +106,7 @@ const MINIO_PUBLIC_URL = process.env.NEXT_PUBLIC_MINIO_PUBLIC_URL ?? 'http://loc
 const MINIO_BUCKET = 'campuscast-content';
 
 function makeItemId() {
-  if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) {
-    return crypto.randomUUID();
-  }
-
-  return `item-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  return createClientId('item');
 }
 
 function asPositiveNumber(value: unknown, fallback: number, min = 0) {
