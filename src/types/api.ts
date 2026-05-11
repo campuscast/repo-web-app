@@ -119,6 +119,16 @@ export const screenGroupSchema = z.object({
   zone_id: z.string(),
   name: z.string(),
   description: nullableStringToEmpty.default(''),
+  layout_items: z.array(
+    z.object({
+      device_id: z.string(),
+      display_id: z.string(),
+      x: z.number(),
+      y: z.number(),
+      width: z.number().int().nonnegative().default(0),
+      height: z.number().int().nonnegative().default(0),
+    }),
+  ).default([]),
   created_at: z.string().default('')
 });
 
@@ -147,10 +157,48 @@ export const deviceSchema = z.object({
   zone_id: z.string(),
   group_id: nullableStringToEmpty.default(''),
   status: z.enum(['pending', 'active', 'revoked', 'offline']),
+  online: z.boolean().nullable().optional(),
   hardware_id: z.string().nullable().optional(),
   mqtt_client_id: z.string().nullable().optional(),
   enrolled_at: z.string().nullable().optional(),
   last_seen: z.string().nullable().optional()
+});
+
+export const deviceDisplaySchema = z.object({
+  id: z.string(),
+  label: z.string().default(''),
+  width: z.number().int().nonnegative().default(0),
+  height: z.number().int().nonnegative().default(0),
+  selected: z.boolean().default(false),
+});
+
+export const screenshotRequestSchema = z.object({
+  request_id: z.string(),
+  display_id: z.string(),
+  requested_at: z.string(),
+});
+
+export const deviceRuntimeSchema = z.object({
+  device_id: z.string(),
+  device_name: z.string().default(''),
+  zone_id: z.string().default(''),
+  group_id: nullableStringToEmpty.default(''),
+  status: z.string().default('pending'),
+  current_release_id: z.string().nullable().optional(),
+  current_slot_id: z.string().nullable().optional(),
+  current_publication_id: z.string().nullable().optional(),
+  current_publication_title: z.string().nullable().optional(),
+  current_publication_item_id: z.string().nullable().optional(),
+  current_publication_item_title: z.string().nullable().optional(),
+  playback_status: z.string().nullable().optional(),
+  online: z.boolean().nullable().optional(),
+  backend_status: z.string().nullable().optional(),
+  mqtt_status: z.string().nullable().optional(),
+  last_error: z.string().nullable().optional(),
+  last_telemetry_at: z.string().nullable().optional(),
+  displays: z.array(deviceDisplaySchema).default([]),
+  selected_display_ids: z.array(z.string()).default([]),
+  screenshot_request: screenshotRequestSchema.nullable().optional(),
 });
 
 export const registerDeviceRequestSchema = z.object({
@@ -227,7 +275,8 @@ export const contentAssetSchema = z.object({
 
 export const contentListResponseSchema = z.object({
   data: z.array(contentAssetSchema).default([]),
-  pagination: paginationSchema.default({ total: 0, page: 1, page_size: 20 })
+  pagination: paginationSchema.default({ total: 0, page: 1, page_size: 20 }),
+  publication_usage_by_asset: z.record(z.string(), z.coerce.number().int().nonnegative()).default({}),
 });
 
 export const contentAssetUsageByZoneSchema = z.object({
@@ -251,6 +300,7 @@ export const publicationSlideSchema = z.object({
   title: z.string().default(''),
   body: z.string().default(''),
   image_asset_id: z.string().default(''),
+  external_url: z.string().default(''),
   logo_asset_id: z.string().default(''),
   layout: z.enum(['centered', 'split', 'title-top']).default('centered'),
   image_fit: z.enum(['cover', 'contain', 'stretch', 'center']).default('cover'),
@@ -525,7 +575,17 @@ export const devicePreviewSchema = z.object({
   captured_at: z.string().nullable().optional(),
   width: z.number().int().nullable().optional(),
   height: z.number().int().nullable().optional(),
+  display_id: z.string().nullable().optional(),
+  display_label: z.string().nullable().optional(),
+  request_id: z.string().nullable().optional(),
   updated_at: z.string().nullable().optional(),
+});
+
+export const devicePreviewRequestResponseSchema = z.object({
+  device_id: z.string(),
+  request_id: z.string(),
+  display_id: z.string(),
+  requested_at: z.string(),
 });
 
 export type TokenPair = z.infer<typeof tokenPairSchema>;
@@ -536,8 +596,12 @@ export type MfaStatus = z.infer<typeof mfaStatusSchema>;
 export type MfaSetup = z.infer<typeof mfaSetupSchema>;
 export type Zone = z.infer<typeof zoneSchema>;
 export type ScreenGroup = z.infer<typeof screenGroupSchema>;
+export type ScreenGroupLayoutItem = ScreenGroup['layout_items'][number];
 export type ZonePolicy = z.infer<typeof zonePolicySchema>;
 export type Device = z.infer<typeof deviceSchema>;
+export type DeviceDisplay = z.infer<typeof deviceDisplaySchema>;
+export type ScreenshotRequest = z.infer<typeof screenshotRequestSchema>;
+export type DeviceRuntime = z.infer<typeof deviceRuntimeSchema>;
 export type RegisterDeviceRequest = z.infer<typeof registerDeviceRequestSchema>;
 export type CreatePendingRequest = z.infer<typeof createPendingRequestSchema>;
 export type UpdateDeviceRequest = z.infer<typeof updateDeviceRequestSchema>;
@@ -568,6 +632,7 @@ export type PublishResponse = z.infer<typeof publishResponseSchema>;
 export type ReleaseManifestSummary = z.infer<typeof releaseManifestSummarySchema>;
 export type ScheduleRelease = z.infer<typeof scheduleReleaseSchema>;
 export type DevicePreview = z.infer<typeof devicePreviewSchema>;
+export type DevicePreviewRequestResponse = z.infer<typeof devicePreviewRequestResponseSchema>;
 export type AdminUser = z.infer<typeof adminUserSchema>;
 export type AdminUserDetails = z.infer<typeof adminUserDetailsSchema>;
 export type AdminRole = z.infer<typeof roleSchema>;

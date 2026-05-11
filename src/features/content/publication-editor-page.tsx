@@ -1,26 +1,41 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import type { CSSProperties, ReactNode } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import {
   ArrowDown,
   ArrowLeft,
   ArrowUp,
   Clapperboard,
+  ExternalLink,
   FileImage,
   GripVertical,
   ImageOff,
+  LayoutPanelTop,
+  Monitor,
   Plus,
   Save,
   Trash2,
+  Tv,
   Upload,
   Video,
 } from 'lucide-react';
 import { useRouter, useSearchParams } from 'next/navigation';
+import useMeasure from 'react-use-measure';
 import { toast } from 'sonner';
 import { hasRole } from '@/auth/guards';
 import { useAuthStore } from '@/auth/store';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { ScrollArea } from '@/components/ui/scroll-area';
@@ -28,18 +43,24 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Textarea } from '@/components/ui/textarea';
 import { useLocale } from '@/hooks/use-locale';
 import { createClientId } from '@/lib/id';
+import { queryKeys } from '@/lib/query-keys';
 import { cn } from '@/lib/utils';
 import { contentService } from '@/services/content-service';
 import { publicationService } from '@/services/publication-service';
 import { zoneService } from '@/services/zone-service';
-import type { ContentAsset, PublicationItem, Zone } from '@/types/api';
+import type { ContentAsset, PublicationItem, ScreenGroup, Zone } from '@/types/api';
 import {
+  toApiItemMetadata,
+  toEditorDisplayScope,
   hasSlideTextContent,
   removeItemAndResolveSelection,
   resolveSelectedItemId,
   toApiSlideData,
   toEditorSlideData,
+  type DisplayScopeMode,
+  type EditorDisplayScope,
   type EditorSlideData,
+  type ScreenGroupRenderMode,
   type SlideImageFitMode,
   type SlideLayout,
 } from './publication-editor-state';
@@ -52,6 +73,14 @@ import {
   normalizeSlideImageFitMode,
   resolveSlidePresentation,
 } from './custom-slide-rendering';
+import {
+  buildExternalSlidePreviewUrl,
+  calculateScaledPreviewLayout,
+  normalizeEmbeddedSlideUrl,
+  resolveExternalSlideSource,
+  type PreviewSurfaceSize,
+} from './external-slide-preview';
+import { getScreenGroupLayoutBounds } from '../screen-groups/screen-group-layout';
 
 type PublicationStatus = 'draft' | 'active' | 'archived';
 type TransitionType = 'cut' | 'fade';
@@ -74,6 +103,7 @@ type EditorItemBase = {
   title: string;
   durationMs: number;
   transition: EditorTransition;
+  displayScope: EditorDisplayScope;
   metadata: Record<string, unknown>;
 };
 
@@ -104,7 +134,12 @@ type PublicationEditorPageProps = {
 
 const MINIO_PUBLIC_URL = process.env.NEXT_PUBLIC_MINIO_PUBLIC_URL ?? 'http://localhost:9000';
 const MINIO_BUCKET = 'campuscast-content';
-
+const HEADER_ZONE_CONTROL_CLASS = 'h-8 w-full sm:w-[220px]';
+const COMPACT_CONTROL_CLASS = 'w-full md:max-w-[240px]';
+const PREVIEW_GROUP_MAX_WIDTH = 300;
+const PREVIEW_GROUP_MAX_HEIGHT = 220;
+const PREVIEW_DIALOG_GROUP_MAX_WIDTH = 1080;
+const PREVIEW_DIALOG_GROUP_MAX_HEIGHT = 680;
 function makeItemId() {
   return createClientId('item');
 }
@@ -129,6 +164,11 @@ function makeDefaultSlideItem(): EditorSlideItem {
     title: 'Slide',
     durationMs: 10000,
     transition: { type: 'cut', durationMs: 0 },
+    displayScope: {
+      mode: 'single_screen',
+      groupId: '',
+      groupRenderMode: 'partitioned',
+    },
     slide: toEditorSlideData(),
     metadata: {},
   };
@@ -141,6 +181,11 @@ function makeDefaultVideoItem(): EditorVideoItem {
     title: 'Video item',
     durationMs: 15000,
     transition: { type: 'cut', durationMs: 0 },
+    displayScope: {
+      mode: 'single_screen',
+      groupId: '',
+      groupRenderMode: 'partitioned',
+    },
     video: {
       assetId: '',
       trimInMs: 0,
@@ -165,6 +210,7 @@ function toEditorItem(item: PublicationItem): EditorPublicationItem {
       type: (item.transition?.type === 'fade' ? 'fade' : 'cut') as TransitionType,
       durationMs: asPositiveNumber(item.transition?.duration_ms, 0, 0),
     },
+    displayScope: toEditorDisplayScope(item.metadata ?? {}),
     metadata: item.metadata ?? {},
   };
 
@@ -199,7 +245,7 @@ function toApiItem(item: EditorPublicationItem): PublicationItem {
       type: item.transition.type,
       duration_ms: asPositiveNumber(item.transition.durationMs, 0, 0),
     },
-    metadata: item.metadata,
+    metadata: toApiItemMetadata(item.metadata, item.displayScope),
   } as PublicationItem;
 
   if (item.type === 'video_asset') {
@@ -245,6 +291,8 @@ type AssetSelectorProps = {
   onChange: (value: string) => void;
   placeholder: string;
   noneLabel: string;
+  triggerClassName?: string;
+  disabled?: boolean;
 };
 
 function AssetSelector({
@@ -253,13 +301,16 @@ function AssetSelector({
   onChange,
   placeholder,
   noneLabel,
+  triggerClassName = 'w-full',
+  disabled = false,
 }: AssetSelectorProps) {
   return (
     <Select
       value={value || '__none__'}
       onValueChange={(next) => onChange(next === '__none__' ? '' : next)}
+      disabled={disabled}
     >
-      <SelectTrigger>
+      <SelectTrigger className={triggerClassName}>
         <SelectValue placeholder={placeholder} />
       </SelectTrigger>
       <SelectContent>
@@ -271,6 +322,173 @@ function AssetSelector({
         ))}
       </SelectContent>
     </Select>
+  );
+}
+
+function EditorFieldGroup({
+  title,
+  description,
+  children,
+}: {
+  title: string;
+  description?: string;
+  children: ReactNode;
+}) {
+  return (
+    <section className="rounded-xl border bg-muted/10 p-4">
+      <div className="mb-4">
+        <h3 className="text-sm font-semibold tracking-tight">{title}</h3>
+        {description ? <p className="mt-1 text-xs leading-relaxed text-muted-foreground">{description}</p> : null}
+      </div>
+      <div className="space-y-4">{children}</div>
+    </section>
+  );
+}
+
+function ExternalSlideWebCanvas({
+  url,
+  title,
+  surfaceSize,
+}: {
+  url: string;
+  title: string;
+  surfaceSize?: PreviewSurfaceSize;
+}) {
+  const [viewportRef, viewportBounds] = useMeasure();
+  const previewUrl = buildExternalSlidePreviewUrl(url);
+  const layout = useMemo(
+    () =>
+      calculateScaledPreviewLayout(
+        {
+          width: viewportBounds.width,
+          height: viewportBounds.height,
+        },
+        surfaceSize,
+      ),
+    [surfaceSize, viewportBounds.height, viewportBounds.width],
+  );
+
+  return (
+    <div ref={viewportRef} className="absolute inset-0 overflow-hidden bg-white">
+      <div
+        className="absolute left-1/2 top-1/2 overflow-hidden rounded-[2px] bg-white shadow-[0_0_0_1px_rgba(15,23,42,0.08)]"
+        style={{
+          width: layout.frameWidth,
+          height: layout.frameHeight,
+          transform: 'translate(-50%, -50%)',
+        }}
+      >
+        <iframe
+          src={previewUrl}
+          title={title}
+          className="pointer-events-none absolute left-0 top-0 border-0 bg-white"
+          style={{
+            width: layout.width,
+            height: layout.height,
+            transform: `scale(${layout.scale})`,
+            transformOrigin: 'top left',
+          }}
+          loading="lazy"
+          referrerPolicy="no-referrer"
+          sandbox="allow-forms allow-modals allow-popups allow-popups-to-escape-sandbox allow-scripts"
+        />
+      </div>
+    </div>
+  );
+}
+
+function PublicationItemCanvas({
+  item,
+  assets,
+  className,
+  style,
+  titleClassName = 'text-lg',
+  bodyClassName = 'text-sm',
+  previewSurfaceSize,
+}: {
+  item: EditorPublicationItem;
+  assets: ContentAsset[];
+  className?: string;
+  style?: CSSProperties;
+  titleClassName?: string;
+  bodyClassName?: string;
+  previewSurfaceSize?: PreviewSurfaceSize;
+}) {
+  if (item.type === 'video_asset') {
+    const videoAsset = assets.find((asset) => asset.asset_id === item.video.assetId);
+    const videoUrl = assetPreviewUrl(videoAsset);
+
+    return (
+      <div className={cn('relative overflow-hidden bg-black', className)} style={style}>
+        {videoAsset && videoUrl ? (
+          <video
+            src={videoUrl}
+            className="absolute inset-0 h-full w-full object-cover"
+            autoPlay
+            muted
+            loop={item.video.loop}
+            playsInline
+          />
+        ) : (
+          <div className="flex h-full w-full flex-col items-center justify-center gap-2 text-sm text-white/70">
+            <Video className="size-8" />
+            <p>No video asset selected</p>
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  const externalSource = resolveExternalSlideSource(item.slide.externalUrl);
+  const imageAsset = assets.find((asset) => asset.asset_id === item.slide.imageAssetId);
+  const model = resolveSlidePresentation({
+    background: item.slide.background,
+    title: item.slide.title,
+    body: item.slide.body,
+    layout: item.slide.layout,
+    image_fit: item.slide.imageFit,
+    text_overlay: item.slide.showTextOverlay,
+  });
+  const imageUrl = externalSource?.kind === 'image' ? externalSource.url : assetPreviewUrl(imageAsset);
+  const showTextOverlay = model.renderTextOverlay;
+  const showEmbeddedPage = externalSource?.kind === 'web';
+
+  return (
+    <div
+      className={cn('relative overflow-hidden', className)}
+      style={{
+        background: model.background,
+        ...style,
+      }}
+    >
+      {showEmbeddedPage ? (
+        <ExternalSlideWebCanvas
+          url={externalSource.url}
+          title={item.slide.title || item.title || 'External slide'}
+          surfaceSize={previewSurfaceSize}
+        />
+      ) : imageUrl ? (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img
+          src={imageUrl}
+          alt={model.title || item.title}
+          className={getSlideImageClassName(model.imageFit)}
+          style={getSlideImageStyle(model.imageFit)}
+        />
+      ) : null}
+
+      {!showEmbeddedPage && showTextOverlay ? (
+        <>
+          <div className={getSlideScrimClassName(model.layout)} />
+          <div className={getSlideTextLayerClassName(model.layout)}>
+            <div className={cn(getSlideTextBlockClassName(model.layout), 'text-white')}>
+              {model.title ? <h3 className={cn('font-semibold tracking-tight', titleClassName)}>{model.title}</h3> : null}
+              {model.body ? <p className={cn('leading-relaxed text-white/90', bodyClassName)}>{model.body}</p> : null}
+            </div>
+          </div>
+        </>
+      ) : null}
+    </div>
   );
 }
 
@@ -317,55 +535,153 @@ function PublicationItemPreview({
     );
   }
 
-  const imageAsset = assets.find((asset) => asset.asset_id === item.slide.imageAssetId);
-  const imageUrl = assetPreviewUrl(imageAsset);
-  const model = resolveSlidePresentation({
-    background: item.slide.background,
-    title: item.slide.title,
-    body: item.slide.body,
-    layout: item.slide.layout,
-    image_fit: item.slide.imageFit,
-    text_overlay: item.slide.showTextOverlay,
-  });
-  const showTextOverlay = model.renderTextOverlay;
-
   return (
     <div className="space-y-3">
-      <div
-        className="relative aspect-video overflow-hidden rounded-xl border"
-        style={{ background: model.background }}
-      >
-        {imageUrl ? (
-          // eslint-disable-next-line @next/next/no-img-element
-          <img
-            src={imageUrl}
-            alt={model.title || item.title}
-            className={getSlideImageClassName(model.imageFit)}
-            style={getSlideImageStyle(model.imageFit)}
-          />
-        ) : null}
-
-        {showTextOverlay ? (
-          <>
-            <div className={getSlideScrimClassName(model.layout)} />
-            <div className={getSlideTextLayerClassName(model.layout)}>
-              <div className={cn(getSlideTextBlockClassName(model.layout), 'text-white')}>
-                {model.title ? <h3 className="text-lg font-semibold tracking-tight">{model.title}</h3> : null}
-                {model.body ? <p className="text-sm leading-relaxed text-white/90">{model.body}</p> : null}
-              </div>
-            </div>
-          </>
-        ) : null}
-      </div>
+      <PublicationItemCanvas item={item} assets={assets} className="aspect-video rounded-xl border" />
 
       <div className="rounded-xl border bg-card p-3">
         <p className="text-sm font-medium">{item.title || 'Untitled slide'}</p>
         <p className="mt-1 text-xs text-muted-foreground">
           {formatDurationLabel(item.durationMs)} • transition {item.transition.type}
         </p>
-        {!showTextOverlay && !hasSlideTextContent(item.slide) ? (
+        {resolveExternalSlideSource(item.slide.externalUrl) ? (
+          <p className="mt-1 text-xs text-muted-foreground">External slide</p>
+        ) : !item.slide.showTextOverlay || !hasSlideTextContent(item.slide) ? (
           <p className="mt-1 text-xs text-muted-foreground">{imageOnlyLabel}</p>
         ) : null}
+      </div>
+    </div>
+  );
+}
+
+function ScreenGroupPublicationPreview({
+  item,
+  assets,
+  group,
+  zoneName,
+  renderMode,
+  maxWidth = PREVIEW_GROUP_MAX_WIDTH,
+  maxHeight = PREVIEW_GROUP_MAX_HEIGHT,
+  minCanvasHeight = 260,
+  viewportClassName,
+}: {
+  item: EditorPublicationItem;
+  assets: ContentAsset[];
+  group: ScreenGroup | null;
+  zoneName: string;
+  renderMode: ScreenGroupRenderMode;
+  maxWidth?: number;
+  maxHeight?: number;
+  minCanvasHeight?: number;
+  viewportClassName?: string;
+}) {
+  const [viewportRef, viewportBounds] = useMeasure();
+
+  if (!group) {
+    return (
+      <div className="rounded-xl border border-dashed p-4 text-sm text-muted-foreground">
+        Выберите группу экранов для предпросмотра.
+      </div>
+    );
+  }
+
+  const layoutItems = (group.layout_items ?? []).filter((entry) => entry.width > 0 && entry.height > 0);
+  if (!layoutItems.length) {
+    return (
+      <div className="rounded-xl border border-dashed p-4 text-sm text-muted-foreground">
+        Для этой группы ещё не сохранена композиция экранов. Сначала соберите её в Screen Groups.
+      </div>
+    );
+  }
+
+  const bounds = getScreenGroupLayoutBounds(layoutItems);
+  const availableWidth =
+    viewportBounds.width > 0 ? Math.max(1, Math.min(maxWidth, viewportBounds.width - 8)) : maxWidth;
+  const availableHeight =
+    viewportBounds.height > 0 ? Math.max(1, Math.min(maxHeight, viewportBounds.height - 8)) : maxHeight;
+  const scale = Math.min(
+    1,
+    availableWidth / Math.max(bounds.width, 1),
+    availableHeight / Math.max(bounds.height, 1),
+  );
+  const frameWidth = Math.max(1, bounds.width * scale);
+  const frameHeight = Math.max(1, bounds.height * scale);
+  const isPartitioned = renderMode === 'partitioned';
+
+  return (
+    <div className="space-y-3">
+      <div className="rounded-xl border bg-card p-3">
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <p className="text-sm font-medium">{group.name}</p>
+            <p className="mt-1 text-xs text-muted-foreground">{zoneName}</p>
+          </div>
+          <div className="flex items-center gap-2">
+            <Badge variant="outline">{layoutItems.length}</Badge>
+            <Badge variant="secondary">{isPartitioned ? 'Partitioned' : 'Duplicated'}</Badge>
+          </div>
+        </div>
+      </div>
+
+      <div className="rounded-xl border bg-muted/20 p-3">
+        <div
+          ref={viewportRef}
+          className={cn('flex items-center justify-center overflow-auto', viewportClassName)}
+          style={{ minHeight: minCanvasHeight }}
+        >
+          <div
+            className="relative"
+            style={{ width: frameWidth, height: frameHeight }}
+          >
+            {layoutItems.map((layoutItem) => {
+              const left = (layoutItem.x - bounds.minX) * scale;
+              const top = (layoutItem.y - bounds.minY) * scale;
+              const width = layoutItem.width * scale;
+              const height = layoutItem.height * scale;
+
+              return (
+                <div
+                  key={`${layoutItem.device_id}:${layoutItem.display_id}`}
+                  className="absolute overflow-hidden rounded-lg border border-border/80 bg-card shadow-sm"
+                  style={{ left, top, width, height }}
+                >
+                  {isPartitioned ? (
+                    <div
+                      style={{
+                        width: frameWidth,
+                        height: frameHeight,
+                        transform: `translate(${-left}px, ${-top}px)`,
+                      }}
+                    >
+                      <PublicationItemCanvas
+                        item={item}
+                        assets={assets}
+                        className="h-full w-full"
+                        style={{ width: frameWidth, height: frameHeight }}
+                        titleClassName="text-sm"
+                        bodyClassName="text-[11px]"
+                        previewSurfaceSize={{ width: bounds.width, height: bounds.height }}
+                      />
+                    </div>
+                  ) : (
+                    <PublicationItemCanvas
+                      item={item}
+                      assets={assets}
+                      className="h-full w-full"
+                      titleClassName="text-xs"
+                      bodyClassName="text-[10px]"
+                      previewSurfaceSize={{ width: layoutItem.width, height: layoutItem.height }}
+                    />
+                  )}
+
+                  <div className="pointer-events-none absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/75 via-black/35 to-transparent px-2 py-1 text-[10px] font-medium text-white">
+                    {layoutItem.display_id}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
       </div>
     </div>
   );
@@ -376,6 +692,9 @@ export function PublicationEditorPage({ mode, publicationId }: PublicationEditor
   const router = useRouter();
   const searchParams = useSearchParams();
   const zoneIdFromQuery = searchParams.get('zone_id') || '';
+  const titleFromQuery = searchParams.get('title') || '';
+  const typeFromQuery = searchParams.get('type') || '';
+  const initialPublicationType = typeFromQuery || 'slideshow';
 
   const roles = useAuthStore((state) => state.roles);
   const allowedZones = useAuthStore((state) => state.zones);
@@ -390,11 +709,14 @@ export function PublicationEditorPage({ mode, publicationId }: PublicationEditor
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [draggingItemId, setDraggingItemId] = useState('');
+  const [previewModeOverride, setPreviewModeOverride] = useState<DisplayScopeMode | ''>('');
+  const [previewZoneId, setPreviewZoneId] = useState('');
+  const [previewGroupId, setPreviewGroupId] = useState('');
 
   const [editorState, setEditorState] = useState<EditorState>({
     zoneId: '',
-    title: mode === 'create' ? t('publications.createPublication') : '',
-    type: 'slideshow',
+    title: mode === 'create' ? titleFromQuery || t('publications.createPublication') : '',
+    type: initialPublicationType,
     status: 'draft',
     items: [makeDefaultSlideItem()],
   });
@@ -409,10 +731,8 @@ export function PublicationEditorPage({ mode, publicationId }: PublicationEditor
     () => editorState.items.find((item) => item.itemId === selectedItemId) ?? null,
     [editorState.items, selectedItemId],
   );
-  const selectedZone = useMemo(
-    () => zones.find((zone) => zone.zone_id === editorState.zoneId) ?? null,
-    [editorState.zoneId, zones],
-  );
+  const activePreviewMode = previewModeOverride || selectedItem?.displayScope.mode || 'single_screen';
+  const activePreviewRenderMode = selectedItem?.displayScope.groupRenderMode ?? 'partitioned';
 
   const imageAssets = useMemo(
     () => assets.filter((asset) => asset.content_type.startsWith('image/')),
@@ -423,6 +743,28 @@ export function PublicationEditorPage({ mode, publicationId }: PublicationEditor
     () => assets.filter((asset) => asset.content_type.startsWith('video/')),
     [assets],
   );
+  const publicationZoneGroupsQuery = useQuery({
+    queryKey: editorState.zoneId ? queryKeys.zoneGroups(editorState.zoneId) : ['zones', 'groups', 'empty'],
+    queryFn: () => zoneService.listGroups(editorState.zoneId),
+    enabled: Boolean(editorState.zoneId),
+  });
+  const publicationZoneGroups = publicationZoneGroupsQuery.data ?? [];
+  const activePreviewZoneId = visibleZones.some((zone) => zone.zone_id === previewZoneId)
+    ? previewZoneId
+    : editorState.zoneId || visibleZones[0]?.zone_id || '';
+  const previewGroupsQuery = useQuery({
+    queryKey: activePreviewZoneId ? queryKeys.zoneGroups(activePreviewZoneId) : ['zones', 'preview-groups', 'empty'],
+    queryFn: () => zoneService.listGroups(activePreviewZoneId),
+    enabled: Boolean(activePreviewZoneId),
+  });
+  const previewGroups = previewGroupsQuery.data ?? [];
+  const selectedScopeGroup = publicationZoneGroups.find((group) => group.group_id === selectedItem?.displayScope.groupId) ?? null;
+  const preferredPreviewGroupId = previewGroupId || (selectedItem?.displayScope.mode === 'screen_group' ? selectedItem.displayScope.groupId : '');
+  const activePreviewGroupId = previewGroups.some((group) => group.group_id === preferredPreviewGroupId)
+    ? preferredPreviewGroupId
+    : previewGroups[0]?.group_id || '';
+  const activePreviewGroup = previewGroups.find((group) => group.group_id === activePreviewGroupId) ?? null;
+  const activePreviewZoneName = visibleZones.find((zone) => zone.zone_id === activePreviewZoneId)?.name ?? activePreviewZoneId;
 
   useEffect(() => {
     setSelectedItemId((prevSelectedItemId) => {
@@ -485,6 +827,8 @@ export function PublicationEditorPage({ mode, publicationId }: PublicationEditor
       setEditorState((prev) => ({
         ...prev,
         zoneId: effectiveZoneId,
+        title: titleFromQuery || prev.title,
+        type: typeFromQuery || prev.type,
         items: prev.items.length > 0 ? prev.items : [makeDefaultSlideItem()],
       }));
 
@@ -494,7 +838,7 @@ export function PublicationEditorPage({ mode, publicationId }: PublicationEditor
     } finally {
       setLoading(false);
     }
-  }, [allowedZones, canRead, isAdmin, loadAssets, mode, publicationId, t, zoneIdFromQuery]);
+  }, [allowedZones, canRead, isAdmin, loadAssets, mode, publicationId, t, titleFromQuery, typeFromQuery, zoneIdFromQuery]);
 
   useEffect(() => {
     void loadEditor();
@@ -506,6 +850,13 @@ export function PublicationEditorPage({ mode, publicationId }: PublicationEditor
     setEditorState((prev) => ({
       ...prev,
       items: prev.items.map((item) => (item.itemId === selectedItemId ? updater(item) : item)),
+    }));
+  };
+
+  const updateSelectedItemDisplayScope = (updater: (scope: EditorDisplayScope) => EditorDisplayScope) => {
+    updateSelectedItem((item) => ({
+      ...item,
+      displayScope: updater(item.displayScope),
     }));
   };
 
@@ -551,19 +902,27 @@ export function PublicationEditorPage({ mode, publicationId }: PublicationEditor
       ...prev,
       zoneId,
       items: prev.items.map((item) => {
+        const nextDisplayScope = item.displayScope.mode === 'screen_group'
+          ? { ...item.displayScope, groupId: '' }
+          : item.displayScope;
+
         if (item.type === 'video_asset') {
           return {
             ...item,
+            displayScope: nextDisplayScope,
             video: { ...item.video, assetId: '' },
           };
         }
 
         return {
           ...item,
+          displayScope: nextDisplayScope,
           slide: { ...item.slide, imageAssetId: '' },
         };
       }),
     }));
+    setPreviewZoneId(zoneId);
+    setPreviewGroupId('');
 
     void loadAssets(zoneId);
   };
@@ -653,25 +1012,37 @@ export function PublicationEditorPage({ mode, publicationId }: PublicationEditor
 
   return (
     <div className="space-y-4">
-      <div className="rounded-xl border bg-card p-4">
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <div className="flex min-w-[300px] flex-1 items-center gap-2">
-            <Button variant="ghost" size="icon" onClick={() => router.push('/publications')}>
+      <div className="rounded-xl border bg-card px-4 py-3">
+        <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
+          <div className="flex min-w-0 items-center gap-3">
+            <Button variant="ghost" size="icon-sm" onClick={() => router.push('/publications')}>
               <ArrowLeft className="size-4" />
             </Button>
 
-            <Input
-              className="h-11 text-lg font-semibold"
-              value={editorState.title}
-              onChange={(event) => setEditorState((prev) => ({ ...prev, title: event.target.value }))}
-              placeholder={t('publications.title')}
-            />
+            <div className="flex min-w-0 flex-1 flex-col gap-2 sm:flex-row sm:items-center">
+              <Badge variant="outline" className="w-fit shrink-0">
+                {mode === 'create' ? t('publications.create') : editorState.status}
+              </Badge>
+              {mode === 'create' ? (
+                <Input
+                  value={editorState.title}
+                  onChange={(event) =>
+                    setEditorState((prev) => ({
+                      ...prev,
+                      title: event.target.value,
+                    }))
+                  }
+                  className="h-9 min-w-0 max-w-[560px] text-base font-semibold tracking-tight md:text-base"
+                  placeholder={t('publications.createPublication')}
+                />
+              ) : null}
+            </div>
           </div>
 
-          <div className="flex flex-wrap items-center gap-2">
-            {mode === 'create' ? (
+          <div className="flex flex-wrap items-center gap-2 xl:justify-end">
+            {mode === 'create' && visibleZones.length > 0 ? (
               <Select value={editorState.zoneId} onValueChange={handleZoneChange}>
-                <SelectTrigger className="w-[220px]">
+                <SelectTrigger className={HEADER_ZONE_CONTROL_CLASS}>
                   <SelectValue placeholder={t('publications.selectZone')} />
                 </SelectTrigger>
                 <SelectContent>
@@ -682,35 +1053,22 @@ export function PublicationEditorPage({ mode, publicationId }: PublicationEditor
                   ))}
                 </SelectContent>
               </Select>
-            ) : (
-              <div className="flex items-center gap-2">
-                <Badge variant="outline">{selectedZone?.name || editorState.zoneId}</Badge>
-                <Badge variant="outline">{t('publications.zoneLocked')}</Badge>
-              </div>
-            )}
+            ) : null}
 
-            <Select
-              value={editorState.status}
-              onValueChange={(value: PublicationStatus) => setEditorState((prev) => ({ ...prev, status: value }))}
-            >
-              <SelectTrigger className="w-[160px]">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="draft">draft</SelectItem>
-                <SelectItem value="active">active</SelectItem>
-                <SelectItem value="archived">archived</SelectItem>
-              </SelectContent>
-            </Select>
-
-            <Button variant="outline" onClick={() => router.push('/publications')}>
+            <Button variant="outline" size="sm" onClick={() => router.push('/publications')}>
               {t('settings.cancel')}
             </Button>
-            <Button variant="outline" onClick={() => void savePublication()} disabled={!canWrite || saving}>
+            <Button
+              variant="outline"
+              size="sm"
+              className="min-w-[152px]"
+              onClick={() => void savePublication()}
+              disabled={!canWrite || saving}
+            >
               <Save className="mr-1.5 size-4" />
               {saving ? t('publications.saving') : t('publications.savePublication')}
             </Button>
-            <Button onClick={() => void savePublication('active')} disabled={!canWrite || saving}>
+            <Button size="sm" className="min-w-[116px]" onClick={() => void savePublication('active')} disabled={!canWrite || saving}>
               <Upload className="mr-1.5 size-4" />
               {t('publications.publish')}
             </Button>
@@ -718,27 +1076,27 @@ export function PublicationEditorPage({ mode, publicationId }: PublicationEditor
         </div>
       </div>
 
-      <div className="grid gap-4 xl:grid-cols-[280px_minmax(0,1fr)_360px]">
-        <section className="rounded-xl border bg-card">
+      <div className="grid gap-4 xl:grid-cols-[280px_minmax(0,1fr)_360px] xl:items-stretch">
+        <section className="flex h-full min-h-0 flex-col overflow-hidden rounded-xl border bg-card">
           <div className="border-b p-4">
             <div className="flex items-center justify-between">
               <h2 className="text-sm font-semibold">{t('publications.items')}</h2>
               <Badge variant="outline">{editorState.items.length}</Badge>
             </div>
-            <div className="mt-3 flex gap-2">
-              <Button variant="outline" size="sm" onClick={() => addItem('custom_slide')}>
+            <div className="mt-3 grid grid-cols-1 gap-2">
+              <Button variant="outline" size="sm" className="w-full justify-start" onClick={() => addItem('custom_slide')}>
                 <Plus className="mr-1 size-4" />
                 {t('publications.addSlide')}
               </Button>
-              <Button variant="outline" size="sm" onClick={() => addItem('video_asset')}>
+              <Button variant="outline" size="sm" className="w-full justify-start" onClick={() => addItem('video_asset')}>
                 <Plus className="mr-1 size-4" />
                 {t('publications.addVideoItem')}
               </Button>
             </div>
           </div>
 
-          <ScrollArea className="h-[calc(100vh-290px)]">
-            <div className="space-y-2 p-3">
+          <ScrollArea className="min-h-0 flex-1">
+            <div className="space-y-2 p-3 pb-4">
               {editorState.items.map((item) => {
                 const selected = selectedItemId === item.itemId;
 
@@ -785,7 +1143,7 @@ export function PublicationEditorPage({ mode, publicationId }: PublicationEditor
           </ScrollArea>
         </section>
 
-        <section className="rounded-xl border bg-card">
+        <section className="flex h-full min-h-0 flex-col overflow-hidden rounded-xl border bg-card">
           <div className="border-b p-4">
             <div className="flex items-center justify-between gap-2">
               <h2 className="text-sm font-semibold">{t('publications.selectedItem')}</h2>
@@ -800,233 +1158,412 @@ export function PublicationEditorPage({ mode, publicationId }: PublicationEditor
             </div>
           </div>
 
-          <ScrollArea className="h-[calc(100vh-290px)]">
+          <ScrollArea className="min-h-0 flex-1">
             {!selectedItem ? (
               <div className="p-6 text-sm text-muted-foreground">
                 {t('publications.selectItemHint')}
               </div>
             ) : (
-              <div className="space-y-4 p-4">
-                <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
-                  <div className="space-y-1.5">
-                    <Label>{t('publications.itemType')}</Label>
-                    <Select
-                      value={selectedItem.type}
-                      onValueChange={(value: 'custom_slide' | 'video_asset') =>
-                        updateSelectedItem((item) => {
-                          const switched = makeDefaultItem(value);
-                          return {
-                            ...switched,
-                            itemId: item.itemId,
-                            title: item.title || switched.title,
-                            durationMs: item.durationMs,
-                            transition: item.transition,
-                            metadata: item.metadata,
-                          };
-                        })
-                      }
-                    >
-                      <SelectTrigger><SelectValue /></SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="custom_slide">custom_slide</SelectItem>
-                        <SelectItem value="video_asset">video_asset</SelectItem>
-                      </SelectContent>
-                    </Select>
+              <div className="space-y-4 p-4 pb-8">
+                <EditorFieldGroup
+                  title="Item settings"
+                  description="Core item identity and timing. Keep title, duration and transition together so sequence behavior is easier to scan."
+                >
+                  <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
+                    <div className="space-y-1.5">
+                      <Label>{t('publications.itemType')}</Label>
+                      <Select
+                        value={selectedItem.type}
+                        onValueChange={(value: 'custom_slide' | 'video_asset') =>
+                          updateSelectedItem((item) => {
+                            const switched = makeDefaultItem(value);
+                            return {
+                              ...switched,
+                              itemId: item.itemId,
+                              title: item.title || switched.title,
+                              durationMs: item.durationMs,
+                              transition: item.transition,
+                              displayScope: item.displayScope,
+                              metadata: item.metadata,
+                            };
+                          })
+                        }
+                      >
+                        <SelectTrigger className={COMPACT_CONTROL_CLASS}>
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="custom_slide">custom_slide</SelectItem>
+                          <SelectItem value="video_asset">video_asset</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+
+                    <div className="space-y-1.5 md:col-span-2">
+                      <Label>{t('publications.itemTitle')}</Label>
+                      <Input
+                        value={selectedItem.title}
+                        onChange={(event) => updateSelectedItem((item) => ({ ...item, title: event.target.value }))}
+                      />
+                    </div>
                   </div>
 
-                  <div className="space-y-1.5 md:col-span-2">
-                    <Label>{t('publications.itemTitle')}</Label>
-                    <Input
-                      value={selectedItem.title}
-                      onChange={(event) => updateSelectedItem((item) => ({ ...item, title: event.target.value }))}
-                    />
+                  <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+                    <div className="space-y-1.5">
+                      <Label>{t('publications.duration')}</Label>
+                      <Input
+                        className={COMPACT_CONTROL_CLASS}
+                        type="number"
+                        value={selectedItem.durationMs}
+                        onChange={(event) =>
+                          updateSelectedItem((item) => ({
+                            ...item,
+                            durationMs: asPositiveNumber(event.target.value, item.durationMs, 1000),
+                          }))
+                        }
+                      />
+                    </div>
+
+                    <div className="space-y-1.5">
+                      <Label>{t('publications.transition')}</Label>
+                      <Select
+                        value={selectedItem.transition.type}
+                        onValueChange={(value: TransitionType) =>
+                          updateSelectedItem((item) => ({
+                            ...item,
+                            transition: { ...item.transition, type: value },
+                          }))
+                        }
+                      >
+                        <SelectTrigger className={COMPACT_CONTROL_CLASS}>
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="cut">cut</SelectItem>
+                          <SelectItem value="fade">fade</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
                   </div>
 
-                  <div className="space-y-1.5">
-                    <Label>{t('publications.duration')}</Label>
-                    <Input
-                      type="number"
-                      value={selectedItem.durationMs}
-                      onChange={(event) =>
-                        updateSelectedItem((item) => ({
-                          ...item,
-                          durationMs: asPositiveNumber(event.target.value, item.durationMs, 1000),
-                        }))
-                      }
-                    />
+                  <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+                    <div className="space-y-1.5">
+                      <Label>{t('publications.transitionDuration')}</Label>
+                      <Input
+                        className={COMPACT_CONTROL_CLASS}
+                        type="number"
+                        value={selectedItem.transition.durationMs}
+                        onChange={(event) =>
+                          updateSelectedItem((item) => ({
+                            ...item,
+                            transition: {
+                              ...item.transition,
+                              durationMs: asPositiveNumber(event.target.value, item.transition.durationMs, 0),
+                            },
+                          }))
+                        }
+                      />
+                    </div>
                   </div>
-                </div>
+                </EditorFieldGroup>
 
-                <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
-                  <div className="space-y-1.5">
-                    <Label>{t('publications.transition')}</Label>
-                    <Select
-                      value={selectedItem.transition.type}
-                      onValueChange={(value: TransitionType) =>
-                        updateSelectedItem((item) => ({
-                          ...item,
-                          transition: { ...item.transition, type: value },
-                        }))
-                      }
-                    >
-                      <SelectTrigger><SelectValue /></SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="cut">cut</SelectItem>
-                        <SelectItem value="fade">fade</SelectItem>
-                      </SelectContent>
-                    </Select>
+                <EditorFieldGroup
+                  title="Display targeting"
+                  description="Choose whether this item goes to one screen or to a saved screen group, and how the group should render it."
+                >
+                  <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+                    <div className="space-y-1.5">
+                      <Label>Display target</Label>
+                      <Select
+                        value={selectedItem.displayScope.mode}
+                        onValueChange={(value: DisplayScopeMode) =>
+                          updateSelectedItemDisplayScope((scope) => ({
+                            ...scope,
+                            mode: value,
+                            groupId: value === 'screen_group' ? scope.groupId || publicationZoneGroups[0]?.group_id || '' : '',
+                          }))
+                        }
+                      >
+                        <SelectTrigger className={COMPACT_CONTROL_CLASS}>
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="single_screen">Single screen</SelectItem>
+                          <SelectItem value="screen_group">Screen group</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+
+                    <div className="space-y-1.5">
+                      <Label>Screen group</Label>
+                      <Select
+                        value={selectedItem.displayScope.groupId}
+                        onValueChange={(value) =>
+                          updateSelectedItemDisplayScope((scope) => ({
+                            ...scope,
+                            groupId: value,
+                          }))
+                        }
+                        disabled={selectedItem.displayScope.mode !== 'screen_group' || publicationZoneGroups.length === 0}
+                      >
+                        <SelectTrigger className={COMPACT_CONTROL_CLASS}>
+                          <SelectValue
+                            placeholder={
+                              publicationZoneGroups.length > 0
+                                ? 'Select screen group'
+                                : 'No screen groups in this zone'
+                            }
+                          />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {publicationZoneGroups.map((group) => (
+                            <SelectItem key={group.group_id} value={group.group_id}>
+                              {group.name}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
                   </div>
 
-                  <div className="space-y-1.5">
-                    <Label>{t('publications.transitionDuration')}</Label>
-                    <Input
-                      type="number"
-                      value={selectedItem.transition.durationMs}
-                      onChange={(event) =>
-                        updateSelectedItem((item) => ({
-                          ...item,
-                          transition: {
-                            ...item.transition,
-                            durationMs: asPositiveNumber(event.target.value, item.transition.durationMs, 0),
-                          },
-                        }))
-                      }
-                    />
+                  <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+                    <div className="space-y-1.5">
+                      <Label>Group playback</Label>
+                      <Select
+                        value={selectedItem.displayScope.groupRenderMode}
+                        onValueChange={(value: ScreenGroupRenderMode) =>
+                          updateSelectedItemDisplayScope((scope) => ({
+                            ...scope,
+                            groupRenderMode: value,
+                          }))
+                        }
+                        disabled={selectedItem.displayScope.mode !== 'screen_group'}
+                      >
+                        <SelectTrigger className={COMPACT_CONTROL_CLASS}>
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="duplicate">Show full item on every screen</SelectItem>
+                          <SelectItem value="partitioned">Partition one item across the group</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
                   </div>
-                </div>
+
+                  <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+                    <p className="text-xs leading-relaxed text-muted-foreground">
+                      Single screen keeps the item independent per display. Screen group uses the saved screen composition and unlocks duplicated or partitioned playback.
+                    </p>
+                    <p className="text-xs leading-relaxed text-muted-foreground">
+                      Duplicated means every monitor shows the full slide or video. Partitioned means the group acts as one large canvas and each monitor renders its own slice.
+                    </p>
+                  </div>
+
+                  {selectedItem.displayScope.mode === 'screen_group' && selectedScopeGroup ? (
+                    <div className="flex flex-col gap-3 rounded-lg border bg-background p-3 md:flex-row md:items-center md:justify-between">
+                      <div className="min-w-0">
+                        <p className="text-sm font-medium">{selectedScopeGroup.name}</p>
+                        <p className="mt-1 text-xs text-muted-foreground">
+                          Monitor positions come from the Screen Groups composer. Open it when you need to rearrange the physical layout.
+                        </p>
+                      </div>
+                      <Button asChild variant="outline" size="sm">
+                        <a
+                          href={`/screen-groups/${selectedScopeGroup.group_id}/compose?zoneId=${editorState.zoneId}`}
+                          target="_blank"
+                          rel="noreferrer"
+                        >
+                          <LayoutPanelTop className="size-4" />
+                          Edit composition
+                          <ExternalLink className="size-3.5" />
+                        </a>
+                      </Button>
+                    </div>
+                  ) : null}
+                </EditorFieldGroup>
 
                 {selectedItem.type === 'custom_slide' ? (
                   <>
-                    <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
-                      <div className="space-y-1.5">
-                        <Label>{t('publications.imageFit')}</Label>
-                        <Select
-                          value={normalizeSlideImageFitMode(selectedItem.slide.imageFit)}
-                          onValueChange={(value: SlideImageFitMode) =>
-                            updateSelectedItem((item) =>
-                              item.type === 'custom_slide'
-                                ? { ...item, slide: { ...item.slide, imageFit: value } }
-                                : item,
-                            )
-                          }
-                        >
-                          <SelectTrigger><SelectValue /></SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="cover">{t('publications.imageFit.cover')}</SelectItem>
-                            <SelectItem value="contain">{t('publications.imageFit.contain')}</SelectItem>
-                            <SelectItem value="stretch">{t('publications.imageFit.stretch')}</SelectItem>
-                            <SelectItem value="center">{t('publications.imageFit.center')}</SelectItem>
-                          </SelectContent>
-                        </Select>
-                        <p className="text-xs text-muted-foreground">{t('publications.imageFitHint')}</p>
+                    <EditorFieldGroup
+                      title="Canvas"
+                      description="Everything that shapes the slide surface itself: image, background and overall composition."
+                    >
+                      <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+                        <div className="space-y-1.5">
+                          <Label>{t('publications.imageFit')}</Label>
+                          <Select
+                            value={normalizeSlideImageFitMode(selectedItem.slide.imageFit)}
+                            onValueChange={(value: SlideImageFitMode) =>
+                              updateSelectedItem((item) =>
+                                item.type === 'custom_slide'
+                                  ? { ...item, slide: { ...item.slide, imageFit: value } }
+                                  : item,
+                              )
+                            }
+                          >
+                            <SelectTrigger className={COMPACT_CONTROL_CLASS}>
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="cover">{t('publications.imageFit.cover')}</SelectItem>
+                              <SelectItem value="contain">{t('publications.imageFit.contain')}</SelectItem>
+                              <SelectItem value="stretch">{t('publications.imageFit.stretch')}</SelectItem>
+                              <SelectItem value="center">{t('publications.imageFit.center')}</SelectItem>
+                            </SelectContent>
+                          </Select>
+                          <p className="text-xs text-muted-foreground">{t('publications.imageFitHint')}</p>
+                        </div>
+
+                        <div className="space-y-1.5">
+                          <Label>{t('publications.layout')}</Label>
+                          <Select
+                            value={selectedItem.slide.layout}
+                            onValueChange={(value: SlideLayout) =>
+                              updateSelectedItem((item) =>
+                                item.type === 'custom_slide'
+                                  ? { ...item, slide: { ...item.slide, layout: value } }
+                                  : item,
+                              )
+                            }
+                          >
+                            <SelectTrigger className={COMPACT_CONTROL_CLASS}>
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="centered">{t('publications.layout.centered')}</SelectItem>
+                              <SelectItem value="split">{t('publications.layout.split')}</SelectItem>
+                              <SelectItem value="title-top">{t('publications.layout.titleTop')}</SelectItem>
+                            </SelectContent>
+                          </Select>
+                        </div>
+                      </div>
+
+                      <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+                        <div className="space-y-1.5">
+                          <Label>{t('publications.background')}</Label>
+                          <Input
+                            className={COMPACT_CONTROL_CLASS}
+                            value={selectedItem.slide.background}
+                            onChange={(event) =>
+                              updateSelectedItem((item) =>
+                                item.type === 'custom_slide'
+                                  ? { ...item, slide: { ...item.slide, background: event.target.value } }
+                                  : item,
+                              )
+                            }
+                          />
+                        </div>
                       </div>
 
                       <div className="space-y-1.5">
-                        <Label>{t('publications.layout')}</Label>
-                        <Select
-                          value={selectedItem.slide.layout}
-                          onValueChange={(value: SlideLayout) =>
+                        <Label>{t('publications.imageAsset')}</Label>
+                        <AssetSelector
+                          assets={imageAssets}
+                          value={selectedItem.slide.imageAssetId}
+                          onChange={(nextValue) =>
                             updateSelectedItem((item) =>
                               item.type === 'custom_slide'
-                                ? { ...item, slide: { ...item.slide, layout: value } }
+                                ? { ...item, slide: { ...item.slide, imageAssetId: nextValue } }
                                 : item,
                             )
                           }
-                        >
-                          <SelectTrigger><SelectValue /></SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="centered">{t('publications.layout.centered')}</SelectItem>
-                            <SelectItem value="split">{t('publications.layout.split')}</SelectItem>
-                            <SelectItem value="title-top">{t('publications.layout.titleTop')}</SelectItem>
-                          </SelectContent>
-                        </Select>
+                          placeholder={t('publications.optionalImage')}
+                          noneLabel={t('publications.none')}
+                          triggerClassName="w-full"
+                          disabled={Boolean(selectedItem.slide.externalUrl.trim())}
+                        />
+                        {selectedItem.slide.externalUrl.trim() ? (
+                          <p className="text-xs text-muted-foreground">
+                            External URL overrides the image asset until you clear it.
+                          </p>
+                        ) : null}
                       </div>
-                    </div>
 
-                    <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
                       <div className="space-y-1.5">
-                        <Label>{t('publications.background')}</Label>
+                        <Label>External slide URL</Label>
                         <Input
-                          value={selectedItem.slide.background}
+                          className="w-full"
+                          type="url"
+                          placeholder="https://example.com/form"
+                          value={selectedItem.slide.externalUrl}
                           onChange={(event) =>
                             updateSelectedItem((item) =>
                               item.type === 'custom_slide'
-                                ? { ...item, slide: { ...item.slide, background: event.target.value } }
+                                ? { ...item, slide: { ...item.slide, externalUrl: event.target.value } }
+                                : item,
+                            )
+                          }
+                        />
+                        <p className="text-xs text-muted-foreground">
+                          Use a full `http://` or `https://` URL to open an external page or web form as the slide itself.
+                        </p>
+                        {selectedItem.slide.externalUrl.trim() && !normalizeEmbeddedSlideUrl(selectedItem.slide.externalUrl) ? (
+                          <p className="text-xs text-destructive">
+                            The external slide URL must start with `http://` or `https://`.
+                          </p>
+                        ) : null}
+                      </div>
+                    </EditorFieldGroup>
+
+                    <EditorFieldGroup
+                      title="Text overlay"
+                      description="Headline and supporting copy that sits on top of the visual canvas."
+                    >
+                      <div className="space-y-1.5">
+                        <Label>{t('publications.textOverlay')}</Label>
+                        <label className="flex items-center gap-2 rounded-md border bg-background p-2 text-sm">
+                          <Input
+                            className="h-4 w-4"
+                            type="checkbox"
+                            checked={selectedItem.slide.showTextOverlay}
+                            onChange={(event) =>
+                              updateSelectedItem((item) =>
+                                item.type === 'custom_slide'
+                                  ? { ...item, slide: { ...item.slide, showTextOverlay: event.target.checked } }
+                                  : item,
+                              )
+                            }
+                          />
+                          {t('publications.textOverlay')}
+                        </label>
+                        <p className="text-xs text-muted-foreground">{t('publications.textOverlayHint')}</p>
+                      </div>
+
+                      <div className="space-y-1.5">
+                        <Label>{t('publications.slideTitle')}</Label>
+                        <Input
+                          value={selectedItem.slide.title}
+                          onChange={(event) =>
+                            updateSelectedItem((item) =>
+                              item.type === 'custom_slide'
+                                ? { ...item, slide: { ...item.slide, title: event.target.value } }
                                 : item,
                             )
                           }
                         />
                       </div>
-                    </div>
 
-                    <div className="space-y-1.5">
-                      <Label>{t('publications.imageAsset')}</Label>
-                      <AssetSelector
-                        assets={imageAssets}
-                        value={selectedItem.slide.imageAssetId}
-                        onChange={(nextValue) =>
-                          updateSelectedItem((item) =>
-                            item.type === 'custom_slide'
-                              ? { ...item, slide: { ...item.slide, imageAssetId: nextValue } }
-                              : item,
-                          )
-                        }
-                        placeholder={t('publications.optionalImage')}
-                        noneLabel={t('publications.none')}
-                      />
-                    </div>
-
-                    <div className="space-y-1.5">
-                      <Label>{t('publications.textOverlay')}</Label>
-                      <label className="flex items-center gap-2 rounded-md border p-2 text-sm">
-                        <Input
-                          className="h-4 w-4"
-                          type="checkbox"
-                          checked={selectedItem.slide.showTextOverlay}
+                      <div className="space-y-1.5">
+                        <Label>{t('publications.slideBody')}</Label>
+                        <Textarea
+                          rows={8}
+                          value={selectedItem.slide.body}
                           onChange={(event) =>
                             updateSelectedItem((item) =>
                               item.type === 'custom_slide'
-                                ? { ...item, slide: { ...item.slide, showTextOverlay: event.target.checked } }
+                                ? { ...item, slide: { ...item.slide, body: event.target.value } }
                                 : item,
                             )
                           }
                         />
-                        {t('publications.textOverlay')}
-                      </label>
-                      <p className="text-xs text-muted-foreground">{t('publications.textOverlayHint')}</p>
-                    </div>
-
-                    <div className="space-y-1.5">
-                      <Label>{t('publications.slideTitle')}</Label>
-                      <Input
-                        value={selectedItem.slide.title}
-                        onChange={(event) =>
-                          updateSelectedItem((item) =>
-                            item.type === 'custom_slide'
-                              ? { ...item, slide: { ...item.slide, title: event.target.value } }
-                              : item,
-                          )
-                        }
-                      />
-                    </div>
-
-                    <div className="space-y-1.5">
-                      <Label>{t('publications.slideBody')}</Label>
-                      <Textarea
-                        rows={8}
-                        value={selectedItem.slide.body}
-                        onChange={(event) =>
-                          updateSelectedItem((item) =>
-                            item.type === 'custom_slide'
-                              ? { ...item, slide: { ...item.slide, body: event.target.value } }
-                              : item,
-                          )
-                        }
-                      />
-                    </div>
+                      </div>
+                    </EditorFieldGroup>
                   </>
                 ) : (
-                  <>
+                  <EditorFieldGroup
+                    title="Video playback"
+                    description="Playback-specific controls for this item."
+                  >
                     <div className="space-y-1.5">
                       <Label>{t('publications.videoAsset')}</Label>
                       <AssetSelector
@@ -1041,6 +1578,7 @@ export function PublicationEditorPage({ mode, publicationId }: PublicationEditor
                         }
                         placeholder={t('publications.selectAsset')}
                         noneLabel={t('publications.none')}
+                        triggerClassName="w-full"
                       />
                     </div>
 
@@ -1048,6 +1586,7 @@ export function PublicationEditorPage({ mode, publicationId }: PublicationEditor
                       <div className="space-y-1.5">
                         <Label>{t('publications.trimIn')}</Label>
                         <Input
+                          className={COMPACT_CONTROL_CLASS}
                           type="number"
                           value={selectedItem.video.trimInMs}
                           onChange={(event) =>
@@ -1069,6 +1608,7 @@ export function PublicationEditorPage({ mode, publicationId }: PublicationEditor
                       <div className="space-y-1.5">
                         <Label>{t('publications.trimOut')}</Label>
                         <Input
+                          className={COMPACT_CONTROL_CLASS}
                           type="number"
                           value={selectedItem.video.trimOutMs}
                           onChange={(event) =>
@@ -1089,7 +1629,7 @@ export function PublicationEditorPage({ mode, publicationId }: PublicationEditor
                     </div>
 
                     <div className="grid grid-cols-2 gap-3">
-                      <label className="flex items-center gap-2 rounded-md border p-2 text-sm">
+                      <label className="flex items-center gap-2 rounded-md border bg-background p-2 text-sm">
                         <Input
                           className="h-4 w-4"
                           type="checkbox"
@@ -1105,7 +1645,7 @@ export function PublicationEditorPage({ mode, publicationId }: PublicationEditor
                         {t('publications.mute')}
                       </label>
 
-                      <label className="flex items-center gap-2 rounded-md border p-2 text-sm">
+                      <label className="flex items-center gap-2 rounded-md border bg-background p-2 text-sm">
                         <Input
                           className="h-4 w-4"
                           type="checkbox"
@@ -1121,7 +1661,7 @@ export function PublicationEditorPage({ mode, publicationId }: PublicationEditor
                         {t('publications.loop')}
                       </label>
                     </div>
-                  </>
+                  </EditorFieldGroup>
                 )}
 
               </div>
@@ -1130,14 +1670,203 @@ export function PublicationEditorPage({ mode, publicationId }: PublicationEditor
         </section>
 
         <section className="rounded-xl border bg-card p-4">
-          <h2 className="mb-3 text-sm font-semibold">{t('publications.preview')}</h2>
-          <PublicationItemPreview
-            item={selectedItem}
-            assets={assets}
-            imageOnlyLabel={t('publications.imageOnlySlide')}
-          />
+          <div className="mb-3 flex flex-col gap-3">
+            <div className="flex items-center justify-between gap-2">
+              <h2 className="text-sm font-semibold">{t('publications.preview')}</h2>
+              <div className="flex flex-wrap items-center gap-2">
+                <Button
+                  variant={activePreviewMode === 'single_screen' ? 'default' : 'outline'}
+                  size="sm"
+                  onClick={() => setPreviewModeOverride('single_screen')}
+                >
+                  <Monitor className="size-4" />
+                  Screen
+                </Button>
+                <Button
+                  variant={activePreviewMode === 'screen_group' ? 'default' : 'outline'}
+                  size="sm"
+                  onClick={() => setPreviewModeOverride('screen_group')}
+                >
+                  <Tv className="size-4" />
+                  Group
+                </Button>
+              </div>
+            </div>
 
-          {selectedItem?.type === 'custom_slide' && !selectedItem.slide.imageAssetId ? (
+            {activePreviewMode === 'screen_group' ? (
+              <div className="space-y-3 rounded-xl border bg-muted/10 p-3">
+                <div className="space-y-1.5">
+                  <Label>Preview zone</Label>
+                  <Select
+                    value={activePreviewZoneId}
+                    onValueChange={(value) => {
+                      setPreviewZoneId(value);
+                      setPreviewGroupId('');
+                    }}
+                  >
+                    <SelectTrigger className="w-full">
+                      <SelectValue placeholder={t('publications.selectZone')} />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {visibleZones.map((zone) => (
+                        <SelectItem key={zone.zone_id} value={zone.zone_id}>
+                          {zone.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                <div className="space-y-1.5">
+                  <Label>Preview screen group</Label>
+                  <Select
+                    value={activePreviewGroupId}
+                    onValueChange={setPreviewGroupId}
+                    disabled={previewGroups.length === 0}
+                  >
+                    <SelectTrigger className="w-full">
+                      <SelectValue
+                        placeholder={previewGroups.length > 0 ? 'Select screen group' : 'No screen groups in this zone'}
+                      />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {previewGroups.map((group) => (
+                        <SelectItem key={group.group_id} value={group.group_id}>
+                          {group.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                <div className="space-y-1.5">
+                  <Label>Group playback</Label>
+                  <div className="flex flex-wrap gap-2">
+                    <Button
+                      variant={activePreviewRenderMode === 'duplicate' ? 'default' : 'outline'}
+                      size="sm"
+                      disabled={!selectedItem}
+                      onClick={() =>
+                        updateSelectedItemDisplayScope((scope) => ({
+                          ...scope,
+                          groupRenderMode: 'duplicate',
+                        }))
+                      }
+                    >
+                      Duplicated
+                    </Button>
+                    <Button
+                      variant={activePreviewRenderMode === 'partitioned' ? 'default' : 'outline'}
+                      size="sm"
+                      disabled={!selectedItem}
+                      onClick={() =>
+                        updateSelectedItemDisplayScope((scope) => ({
+                          ...scope,
+                          groupRenderMode: 'partitioned',
+                        }))
+                      }
+                    >
+                      Partitioned
+                    </Button>
+                  </div>
+                  <p className="text-xs leading-relaxed text-muted-foreground">
+                    Duplicated shows the full item on every screen. Partitioned turns the whole group into one canvas and each monitor shows only its own slice.
+                  </p>
+                </div>
+
+                {activePreviewGroup ? (
+                  <div className="flex flex-col gap-3 rounded-lg border bg-background p-3">
+                    <div className="flex items-start justify-between gap-3">
+                      <div>
+                        <p className="text-sm font-medium">{activePreviewGroup.name}</p>
+                        <p className="mt-1 text-xs text-muted-foreground">
+                          Change monitor positions in the Screen Groups composer. Preview here always uses the saved composition.
+                        </p>
+                      </div>
+                      <Badge variant="outline">{activePreviewGroup.layout_items.length}</Badge>
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      <Button asChild variant="outline" size="sm">
+                        <a
+                          href={`/screen-groups/${activePreviewGroup.group_id}/compose?zoneId=${activePreviewZoneId}`}
+                          target="_blank"
+                          rel="noreferrer"
+                        >
+                          <LayoutPanelTop className="size-4" />
+                          Edit composition
+                          <ExternalLink className="size-3.5" />
+                        </a>
+                      </Button>
+                    </div>
+                  </div>
+                ) : null}
+              </div>
+            ) : null}
+          </div>
+
+          {activePreviewMode === 'screen_group' && selectedItem ? (
+            <ScreenGroupPublicationPreview
+              item={selectedItem}
+              assets={assets}
+              group={activePreviewGroup}
+              zoneName={activePreviewZoneName}
+              renderMode={activePreviewRenderMode}
+            />
+          ) : (
+            <PublicationItemPreview
+              item={selectedItem}
+              assets={assets}
+              imageOnlyLabel={t('publications.imageOnlySlide')}
+            />
+          )}
+
+          {activePreviewMode === 'screen_group' && activePreviewGroup && selectedItem ? (
+            <Dialog>
+              <DialogTrigger asChild>
+                <Button variant="outline" className="mt-3 w-full">
+                  <LayoutPanelTop className="size-4" />
+                  Open canvas
+                </Button>
+              </DialogTrigger>
+              <DialogContent
+                className="max-h-[calc(100vh-2rem)] max-w-[min(1200px,calc(100vw-2rem))] overflow-hidden p-0"
+                showCloseButton
+              >
+                <DialogHeader className="border-b px-5 py-4">
+                  <DialogTitle>Group preview canvas</DialogTitle>
+                  <DialogDescription>
+                    Inspect the publication item against the saved screen composition and current group playback mode.
+                  </DialogDescription>
+                </DialogHeader>
+                <div className="overflow-auto p-5">
+                  <ScreenGroupPublicationPreview
+                    item={selectedItem}
+                    assets={assets}
+                    group={activePreviewGroup}
+                    zoneName={activePreviewZoneName}
+                    renderMode={activePreviewRenderMode}
+                    maxWidth={PREVIEW_DIALOG_GROUP_MAX_WIDTH}
+                    maxHeight={PREVIEW_DIALOG_GROUP_MAX_HEIGHT}
+                    minCanvasHeight={320}
+                    viewportClassName="max-h-[calc(100vh-18rem)]"
+                  />
+                </div>
+              </DialogContent>
+            </Dialog>
+          ) : null}
+
+          {selectedItem?.type === 'custom_slide'
+            && selectedItem.slide.externalUrl.trim()
+            && !normalizeEmbeddedSlideUrl(selectedItem.slide.externalUrl) ? (
+            <div className="mt-3 flex items-center gap-2 text-xs text-destructive">
+              <ExternalLink className="size-4" />
+              External slide URL must start with `http://` or `https://`.
+            </div>
+          ) : null}
+
+          {selectedItem?.type === 'custom_slide'
+            && !selectedItem.slide.imageAssetId
+            && !selectedItem.slide.externalUrl.trim() ? (
             <div className="mt-3 flex items-center gap-2 text-xs text-muted-foreground">
               <ImageOff className="size-4" />
               {t('publications.previewNoImage')}

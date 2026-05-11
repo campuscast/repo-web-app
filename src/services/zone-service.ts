@@ -42,6 +42,12 @@ export const zoneService = {
   createGroup: (zoneId: string, payload: { name: string; description?: string }) =>
     apiClient.post(`/zones/${zoneId}/groups`, payload, screenGroupSchema),
 
+  updateGroupLayout: (
+    zoneId: string,
+    groupId: string,
+    payload: { items: ScreenGroup['layout_items'] },
+  ) => apiClient.put(`/zones/${zoneId}/groups/${groupId}/layout`, payload, screenGroupSchema),
+
   deleteGroup: (zoneId: string, groupId: string) =>
     apiClient.delete<{ deleted: boolean }>(`/zones/${zoneId}/groups/${groupId}`)
 };

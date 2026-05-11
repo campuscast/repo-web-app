@@ -60,6 +60,16 @@ function formatDeviceType(type: string | null | undefined): string {
   return DEVICE_TYPE_LABELS[type] ?? type;
 }
 
+function ConnectivityBadge({ online }: { online: boolean }) {
+  return (
+    <span
+      className={`inline-block size-2 rounded-full ${online ? 'bg-emerald-500' : 'bg-slate-400'}`}
+      title={online ? 'Online' : 'Offline'}
+      aria-label={online ? 'Online' : 'Offline'}
+    />
+  );
+}
+
 /* ─── URL sync helper ──────────────────────────────────────────── */
 
 function syncUrlParams(zone: string, status: string, q: string) {
@@ -119,7 +129,9 @@ export function DevicesAdmin() {
     queries: zoneIdsForList.map((zoneId) => ({
       queryKey: queryKeys.devices(zoneId),
       queryFn: () => deviceService.listByZone(zoneId),
-      enabled: Boolean(zoneId)
+      enabled: Boolean(zoneId),
+      refetchInterval: 5000,
+      refetchIntervalInBackground: true,
     }))
   });
 
@@ -279,9 +291,9 @@ export function DevicesAdmin() {
         <Table>
           <TableHeader>
             <TableRow>
-              <TableHead className="pl-4">Device</TableHead>
-              <TableHead>Type</TableHead>
-              <TableHead>Status</TableHead>
+              <TableHead className="pl-4 w-[360px]">Device</TableHead>
+              <TableHead className="w-[180px]">Type</TableHead>
+              <TableHead className="w-[180px]">Status</TableHead>
               <TableHead className="w-[52px]" />
             </TableRow>
           </TableHeader>
@@ -296,13 +308,16 @@ export function DevicesAdmin() {
                 ))
               : paged.map((device) => (
                   <TableRow key={device.device_id}>
-                    <TableCell className="pl-4">
-                      <div className="font-medium">{device.device_name}</div>
+                    <TableCell className="pl-4 w-[360px]">
+                      <div className="flex min-w-0 items-center gap-2">
+                        <div className="truncate font-medium">{device.device_name}</div>
+                        <ConnectivityBadge online={device.online === true} />
+                      </div>
                     </TableCell>
-                    <TableCell className="text-muted-foreground">
+                    <TableCell className="w-[180px] text-muted-foreground">
                       {formatDeviceType(device.device_type)}
                     </TableCell>
-                    <TableCell>
+                    <TableCell className="w-[180px]">
                       <StatusBadge
                         tone={
                           device.status === 'active'

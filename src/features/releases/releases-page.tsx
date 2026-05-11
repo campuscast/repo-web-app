@@ -2,9 +2,9 @@
 
 import Link from 'next/link';
 import { useMemo, useState } from 'react';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Search } from 'lucide-react';
 import { useSearchParams } from 'next/navigation';
+import { useMutation, useQueries, useQuery, useQueryClient } from '@tanstack/react-query';
+import { Search } from 'lucide-react';
 import { toast } from 'sonner';
 import { useAuthStore } from '@/auth/store';
 import { hasRole } from '@/auth/guards';
@@ -23,6 +23,7 @@ import { scheduleService } from '@/services/schedule-service';
 import { zoneService } from '@/services/zone-service';
 
 const PAGE_SIZE = 20;
+const ALL_ZONES_VALUE = '__all_zones__';
 
 function releaseTone(status: string): 'success' | 'warning' | 'danger' | 'neutral' {
   if (status === 'active') return 'success';
@@ -52,7 +53,7 @@ export function ReleasesPage() {
   const allowedZones = useAuthStore((state) => state.zones);
   const isAdmin = hasRole(roles, 'admin') || hasRole(roles, 'super_admin');
 
-  const [selectedZoneId, setSelectedZoneId] = useState(searchParams.get('zone_id') || '');
+  const [selectedZoneId, setSelectedZoneId] = useState(searchParams.get('zone_id') || ALL_ZONES_VALUE);
   const [selectedScheduleId, setSelectedScheduleId] = useState(searchParams.get('schedule_id') || 'all');
   const [selectedStatus, setSelectedStatus] = useState('all');
   const [publishedFrom, setPublishedFrom] = useState('');
@@ -68,19 +69,57 @@ export function ReleasesPage() {
     return isAdmin ? zones : zones.filter((zone) => allowedZones.includes(zone.zone_id));
   }, [allowedZones, isAdmin, zonesQuery.data]);
 
-  const effectiveZoneId = selectedZoneId || visibleZones[0]?.zone_id || '';
+  const activeZoneFilter = useMemo(() => {
+    if (selectedZoneId === ALL_ZONES_VALUE) {
+      return ALL_ZONES_VALUE;
+    }
 
-  const schedulesQuery = useQuery({
-    queryKey: effectiveZoneId ? queryKeys.schedules(effectiveZoneId) : ['schedules', 'none'],
-    queryFn: () => scheduleService.listSchedules(effectiveZoneId),
-    enabled: Boolean(effectiveZoneId),
+    return visibleZones.some((zone) => zone.zone_id === selectedZoneId)
+      ? selectedZoneId
+      : ALL_ZONES_VALUE;
+  }, [selectedZoneId, visibleZones]);
+
+  const zoneIdsForSchedules = useMemo(
+    () => activeZoneFilter === ALL_ZONES_VALUE
+      ? visibleZones.map((zone) => zone.zone_id)
+      : [activeZoneFilter],
+    [activeZoneFilter, visibleZones],
+  );
+
+  const scheduleQueries = useQueries({
+    queries: zoneIdsForSchedules.map((zoneId) => ({
+      queryKey: queryKeys.schedules(zoneId),
+      queryFn: () => scheduleService.listSchedules(zoneId),
+      enabled: Boolean(zoneId),
+    })),
   });
+
+  const availableSchedules = useMemo(() => {
+    const map = new Map<string, { schedule_id: string; name: string }>();
+
+    for (const schedule of scheduleQueries.flatMap((query) => query.data ?? [])) {
+      map.set(schedule.schedule_id, {
+        schedule_id: schedule.schedule_id,
+        name: schedule.name,
+      });
+    }
+
+    return Array.from(map.values()).sort((left, right) => left.name.localeCompare(right.name));
+  }, [scheduleQueries]);
+
+  const activeScheduleFilter = useMemo(
+    () =>
+      selectedScheduleId === 'all' || availableSchedules.some((schedule) => schedule.schedule_id === selectedScheduleId)
+        ? selectedScheduleId
+        : 'all',
+    [availableSchedules, selectedScheduleId],
+  );
 
   const releasesQuery = useQuery({
     queryKey: queryKeys.releases(
       JSON.stringify({
-        zone: effectiveZoneId,
-        schedule: selectedScheduleId,
+        zone: activeZoneFilter,
+        schedule: activeScheduleFilter,
         status: selectedStatus,
         from: publishedFrom,
         to: publishedTo,
@@ -89,15 +128,15 @@ export function ReleasesPage() {
     ),
     queryFn: () =>
       releaseService.list({
-        zone_id: effectiveZoneId || undefined,
-        schedule_id: selectedScheduleId !== 'all' ? selectedScheduleId : undefined,
+        zone_id: activeZoneFilter !== ALL_ZONES_VALUE ? activeZoneFilter : undefined,
+        schedule_id: activeScheduleFilter !== 'all' ? activeScheduleFilter : undefined,
         status: selectedStatus !== 'all' ? selectedStatus : undefined,
         published_from: publishedFrom || undefined,
         published_to: publishedTo || undefined,
         page,
         page_size: PAGE_SIZE,
       }),
-    enabled: Boolean(effectiveZoneId),
+    enabled: zonesQuery.isSuccess,
   });
 
   const filteredRows = useMemo(() => {
@@ -128,102 +167,108 @@ export function ReleasesPage() {
     <div className="space-y-4">
       <PageHeader description="Операторский список реальных release-сборок расписаний и manifest-состояния." />
 
+      <div className="flex flex-col gap-3">
+        <div className="flex flex-wrap items-center gap-2">
+          <Select
+            value={activeZoneFilter}
+            onValueChange={(value) => {
+              setSelectedZoneId(value);
+              setSelectedScheduleId('all');
+              setPage(1);
+            }}
+          >
+            <SelectTrigger className="h-8 w-[200px]">
+              <SelectValue placeholder="Zone" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value={ALL_ZONES_VALUE}>All zones</SelectItem>
+              {visibleZones.map((zone) => (
+                <SelectItem key={zone.zone_id} value={zone.zone_id}>
+                  {zone.name}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+
+          <Select
+            value={activeScheduleFilter}
+            onValueChange={(value) => {
+              setSelectedScheduleId(value);
+              setPage(1);
+            }}
+          >
+            <SelectTrigger className="h-8 w-[220px]">
+              <SelectValue placeholder="Schedule" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All schedules</SelectItem>
+              {availableSchedules.map((schedule) => (
+                <SelectItem key={schedule.schedule_id} value={schedule.schedule_id}>
+                  {schedule.name}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+
+          <Select
+            value={selectedStatus}
+            onValueChange={(value) => {
+              setSelectedStatus(value);
+              setPage(1);
+            }}
+          >
+            <SelectTrigger className="h-8 w-[170px]">
+              <SelectValue placeholder="Status" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All statuses</SelectItem>
+              <SelectItem value="pending">pending</SelectItem>
+              <SelectItem value="rolling_out">rolling_out</SelectItem>
+              <SelectItem value="active">active</SelectItem>
+              <SelectItem value="failed">failed</SelectItem>
+            </SelectContent>
+          </Select>
+
+          <Input
+            className="h-8 w-[150px]"
+            type="date"
+            value={publishedFrom}
+            onChange={(event) => {
+              setPublishedFrom(event.target.value);
+              setPage(1);
+            }}
+          />
+
+          <Input
+            className="h-8 w-[150px]"
+            type="date"
+            value={publishedTo}
+            onChange={(event) => {
+              setPublishedTo(event.target.value);
+              setPage(1);
+            }}
+          />
+
+          <div className="relative w-full max-w-xs">
+            <Search className="pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+            <Input
+              className="h-8 pl-8"
+              value={search}
+              onChange={(event) => {
+                setSearch(event.target.value);
+                setPage(1);
+              }}
+              placeholder="Search release/schedule"
+            />
+          </div>
+        </div>
+      </div>
+
       <DataTable
         total={releasesQuery.data?.pagination.total ?? filteredRows.length}
         page={releasesQuery.data?.pagination.page ?? page}
         pageSize={releasesQuery.data?.pagination.page_size ?? PAGE_SIZE}
         onPageChange={setPage}
-        toolbar={(
-          <div className="flex flex-wrap items-center gap-2">
-            <Select
-              value={effectiveZoneId}
-              onValueChange={(value) => {
-                setSelectedZoneId(value);
-                setSelectedScheduleId('all');
-                setPage(1);
-              }}
-            >
-              <SelectTrigger className="w-[200px]">
-                <SelectValue placeholder="Zone" />
-              </SelectTrigger>
-              <SelectContent>
-                {visibleZones.map((zone) => (
-                  <SelectItem key={zone.zone_id} value={zone.zone_id}>
-                    {zone.name}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-
-            <Select
-              value={selectedScheduleId}
-              onValueChange={(value) => {
-                setSelectedScheduleId(value);
-                setPage(1);
-              }}
-            >
-              <SelectTrigger className="w-[220px]">
-                <SelectValue placeholder="Schedule" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All schedules</SelectItem>
-                {(schedulesQuery.data ?? []).map((schedule) => (
-                  <SelectItem key={schedule.schedule_id} value={schedule.schedule_id}>
-                    {schedule.name}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-
-            <Select
-              value={selectedStatus}
-              onValueChange={(value) => {
-                setSelectedStatus(value);
-                setPage(1);
-              }}
-            >
-              <SelectTrigger className="w-[170px]">
-                <SelectValue placeholder="Status" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All statuses</SelectItem>
-                <SelectItem value="pending">pending</SelectItem>
-                <SelectItem value="rolling_out">rolling_out</SelectItem>
-                <SelectItem value="active">active</SelectItem>
-                <SelectItem value="failed">failed</SelectItem>
-              </SelectContent>
-            </Select>
-
-            <Input
-              className="w-[150px]"
-              type="date"
-              value={publishedFrom}
-              onChange={(event) => {
-                setPublishedFrom(event.target.value);
-                setPage(1);
-              }}
-            />
-            <Input
-              className="w-[150px]"
-              type="date"
-              value={publishedTo}
-              onChange={(event) => {
-                setPublishedTo(event.target.value);
-                setPage(1);
-              }}
-            />
-
-            <div className="relative w-[260px]">
-              <Search className="pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-              <Input
-                className="pl-8"
-                value={search}
-                onChange={(event) => setSearch(event.target.value)}
-                placeholder="Search release/schedule"
-              />
-            </div>
-          </div>
-        )}
       >
         <Table>
           <TableHeader>

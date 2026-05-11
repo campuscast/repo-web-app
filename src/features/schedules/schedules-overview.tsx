@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQueries, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Plus, Search } from 'lucide-react';
 import { z } from 'zod';
 import { toast } from 'sonner';
@@ -13,7 +13,16 @@ import { EmptyState } from '@/components/common/empty-state';
 import { PageHeader } from '@/components/common/page-header';
 import { StatusBadge } from '@/components/common/status-badge';
 import { Button } from '@/components/ui/button';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
@@ -22,9 +31,11 @@ import { scheduleService } from '@/services/schedule-service';
 import { zoneService } from '@/services/zone-service';
 
 const PAGE_SIZE = 12;
+const ALL_ZONES_VALUE = '__all_zones__';
 
 const scheduleSchema = z.object({
   name: z.string().min(2, 'Название должно быть не короче 2 символов'),
+  zone_id: z.string().min(1, 'Сначала выберите зону'),
 });
 
 function scheduleTone(status: 'draft' | 'locked' | 'published'): 'success' | 'warning' | 'neutral' {
@@ -45,11 +56,12 @@ export function SchedulesOverview() {
   const allowedZones = useAuthStore((state) => state.zones);
   const isAdmin = hasRole(roles, 'admin') || hasRole(roles, 'super_admin');
 
-  const [selectedZoneId, setSelectedZoneId] = useState('');
-  const [newScheduleName, setNewScheduleName] = useState('');
+  const [selectedZoneId, setSelectedZoneId] = useState(ALL_ZONES_VALUE);
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState<'all' | 'draft' | 'locked' | 'published'>('all');
   const [page, setPage] = useState(1);
+  const [isCreateOpen, setCreateOpen] = useState(false);
+  const [createForm, setCreateForm] = useState({ name: '', zone_id: '' });
 
   const zonesQuery = useQuery({ queryKey: queryKeys.zones, queryFn: zoneService.listZones });
   const visibleZones = useMemo(() => {
@@ -57,26 +69,49 @@ export function SchedulesOverview() {
     return isAdmin ? zones : zones.filter((zone) => allowedZones.includes(zone.zone_id));
   }, [allowedZones, isAdmin, zonesQuery.data]);
 
-  const effectiveZoneId = selectedZoneId || visibleZones[0]?.zone_id || '';
+  const activeZoneFilter = useMemo(() => {
+    if (selectedZoneId === ALL_ZONES_VALUE) {
+      return ALL_ZONES_VALUE;
+    }
 
-  const schedulesQuery = useQuery({
-    queryKey: effectiveZoneId ? queryKeys.schedules(effectiveZoneId) : ['schedules', 'none'],
-    queryFn: () => scheduleService.listSchedules(effectiveZoneId),
-    enabled: Boolean(effectiveZoneId),
+    return visibleZones.some((zone) => zone.zone_id === selectedZoneId)
+      ? selectedZoneId
+      : ALL_ZONES_VALUE;
+  }, [selectedZoneId, visibleZones]);
+
+  const zoneIdsForList = useMemo(
+    () => activeZoneFilter === ALL_ZONES_VALUE
+      ? visibleZones.map((zone) => zone.zone_id)
+      : [activeZoneFilter],
+    [activeZoneFilter, visibleZones],
+  );
+
+  const scheduleQueries = useQueries({
+    queries: zoneIdsForList.map((zoneId) => ({
+      queryKey: queryKeys.schedules(zoneId),
+      queryFn: () => scheduleService.listSchedules(zoneId),
+      enabled: Boolean(zoneId),
+    })),
   });
+
+  const schedulesLoading = zonesQuery.isLoading || scheduleQueries.some((query) => query.isLoading);
+  const schedules = scheduleQueries.flatMap((query) => query.data ?? []);
 
   const createMutation = useMutation({
     mutationFn: async () => {
-      const parsed = scheduleSchema.safeParse({ name: newScheduleName.trim() });
+      const parsed = scheduleSchema.safeParse({
+        name: createForm.name.trim(),
+        zone_id: createForm.zone_id,
+      });
       if (!parsed.success) {
-        throw new Error(parsed.error.issues[0]?.message ?? 'Некорректное название');
+        throw new Error(parsed.error.issues[0]?.message ?? 'Некорректные данные');
       }
-      if (!effectiveZoneId) throw new Error('Сначала выберите зону');
-      return scheduleService.createSchedule({ zone_id: effectiveZoneId, name: parsed.data.name });
+      return scheduleService.createSchedule(parsed.data);
     },
     onSuccess: async (schedule) => {
-      setNewScheduleName('');
-      await queryClient.invalidateQueries({ queryKey: queryKeys.schedules(effectiveZoneId) });
+      setCreateOpen(false);
+      setCreateForm({ name: '', zone_id: '' });
+      await queryClient.invalidateQueries({ queryKey: queryKeys.schedules(schedule.zone_id) });
       toast.success('Расписание создано');
       router.push(`/schedules/${schedule.schedule_id}?tab=calendar&date=${todayDateKey()}`);
     },
@@ -84,96 +119,161 @@ export function SchedulesOverview() {
   });
 
   const filtered = useMemo(() => {
-    const rows = schedulesQuery.data ?? [];
     const lowered = search.trim().toLowerCase();
 
-    return rows.filter((item) => {
-      const matchesSearch = !lowered || item.name.toLowerCase().includes(lowered);
+    return schedules.filter((item) => {
+      const zoneName = visibleZones.find((zone) => zone.zone_id === item.zone_id)?.name ?? item.zone_id;
+      const matchesSearch =
+        !lowered
+        || item.name.toLowerCase().includes(lowered)
+        || zoneName.toLowerCase().includes(lowered);
       const matchesStatus = statusFilter === 'all' || item.status === statusFilter;
       return matchesSearch && matchesStatus;
     });
-  }, [schedulesQuery.data, search, statusFilter]);
+  }, [schedules, search, statusFilter, visibleZones]);
 
-  const paged = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
+  const pageCount = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
+  const currentPage = Math.min(page, pageCount);
+  const paged = filtered.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE);
+
+  const openCreateDialog = () => {
+    if (!visibleZones.length) {
+      toast.error('Создайте или получите доступ хотя бы к одной зоне');
+      return;
+    }
+
+    setCreateForm({
+      name: '',
+      zone_id: activeZoneFilter === ALL_ZONES_VALUE ? '' : activeZoneFilter,
+    });
+    setCreateOpen(true);
+  };
 
   return (
     <div className="space-y-4">
-      <PageHeader
-        description="Schedules: выберите расписание, откройте workspace и управляйте публикацией."
-        actions={(
-          <div className="flex gap-2">
+      <PageHeader description="Schedules: выберите расписание, откройте workspace и управляйте публикацией." />
+
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex flex-1 flex-wrap items-center gap-2">
+          <Select
+            value={activeZoneFilter}
+            onValueChange={(value) => {
+              setSelectedZoneId(value);
+              setPage(1);
+            }}
+          >
+            <SelectTrigger className="h-8 w-[220px]">
+              <SelectValue placeholder="Filter by zone" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value={ALL_ZONES_VALUE}>All zones</SelectItem>
+              {visibleZones.map((zone) => (
+                <SelectItem key={zone.zone_id} value={zone.zone_id}>
+                  {zone.name}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+
+          <Select
+            value={statusFilter}
+            onValueChange={(value) => {
+              setStatusFilter(value as typeof statusFilter);
+              setPage(1);
+            }}
+          >
+            <SelectTrigger className="h-8 w-[180px]">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All statuses</SelectItem>
+              <SelectItem value="draft">draft</SelectItem>
+              <SelectItem value="locked">locked</SelectItem>
+              <SelectItem value="published">published</SelectItem>
+            </SelectContent>
+          </Select>
+
+          <div className="relative w-full max-w-xs">
+            <Search className="pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
             <Input
-              value={newScheduleName}
-              onChange={(event) => setNewScheduleName(event.target.value)}
-              placeholder="Новое расписание"
-              className="w-56"
+              className="h-8 pl-8"
+              value={search}
+              onChange={(event) => {
+                setSearch(event.target.value);
+                setPage(1);
+              }}
+              placeholder="Search schedule"
             />
-            <Button onClick={() => createMutation.mutate()} disabled={createMutation.isPending}>
-              <Plus className="size-4" />
-              Создать
-            </Button>
           </div>
-        )}
-      />
+        </div>
+
+        <Button className="h-8 self-start sm:self-auto" onClick={openCreateDialog} disabled={!visibleZones.length}>
+          <Plus className="size-4" />
+          New schedule
+        </Button>
+      </div>
+
+      <Dialog
+        open={isCreateOpen}
+        onOpenChange={(open) => {
+          setCreateOpen(open);
+          if (!open) {
+            setCreateForm({ name: '', zone_id: '' });
+          }
+        }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Create schedule</DialogTitle>
+            <DialogDescription>
+              Укажите название нового расписания и выберите зону, к которой оно будет относиться.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <Label htmlFor="schedule-name">Schedule name</Label>
+              <Input
+                id="schedule-name"
+                value={createForm.name}
+                onChange={(event) => setCreateForm((current) => ({ ...current, name: event.target.value }))}
+              />
+            </div>
+
+            <div className="space-y-2">
+              <Label>Zone</Label>
+              <Select
+                value={createForm.zone_id}
+                onValueChange={(value) => setCreateForm((current) => ({ ...current, zone_id: value }))}
+              >
+                <SelectTrigger className="w-full">
+                  <SelectValue placeholder="Select zone" />
+                </SelectTrigger>
+                <SelectContent>
+                  {visibleZones.map((zone) => (
+                    <SelectItem key={zone.zone_id} value={zone.zone_id}>
+                      {zone.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setCreateOpen(false)}>Cancel</Button>
+            <Button onClick={() => createMutation.mutate()} disabled={createMutation.isPending}>
+              {createMutation.isPending ? 'Creating...' : 'Create'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <DataTable
         total={filtered.length}
-        page={page}
+        page={currentPage}
         pageSize={PAGE_SIZE}
         onPageChange={setPage}
-        toolbar={(
-          <div className="flex flex-wrap items-center gap-2">
-            <Select
-              value={effectiveZoneId}
-              onValueChange={(value) => {
-                setSelectedZoneId(value);
-                setPage(1);
-              }}
-            >
-              <SelectTrigger className="w-[220px]">
-                <SelectValue placeholder="Выберите зону" />
-              </SelectTrigger>
-              <SelectContent>
-                {visibleZones.map((zone) => (
-                  <SelectItem key={zone.zone_id} value={zone.zone_id}>
-                    {zone.name}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-
-            <Select
-              value={statusFilter}
-              onValueChange={(value) => {
-                setStatusFilter(value as typeof statusFilter);
-                setPage(1);
-              }}
-            >
-              <SelectTrigger className="w-[180px]">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">Все статусы</SelectItem>
-                <SelectItem value="draft">draft</SelectItem>
-                <SelectItem value="locked">locked</SelectItem>
-                <SelectItem value="published">published</SelectItem>
-              </SelectContent>
-            </Select>
-
-            <div className="relative w-[280px]">
-              <Search className="pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-              <Input
-                className="pl-8"
-                value={search}
-                onChange={(event) => {
-                  setSearch(event.target.value);
-                  setPage(1);
-                }}
-                placeholder="Поиск по названию"
-              />
-            </div>
-          </div>
-        )}
       >
         <Table>
           <TableHeader>
@@ -186,7 +286,7 @@ export function SchedulesOverview() {
             </TableRow>
           </TableHeader>
           <TableBody>
-            {schedulesQuery.isLoading
+            {schedulesLoading
               ? Array.from({ length: 6 }).map((_, index) => (
                   <TableRow key={index}>
                     <TableCell colSpan={5}>
@@ -219,13 +319,17 @@ export function SchedulesOverview() {
           </TableBody>
         </Table>
 
-        {!schedulesQuery.isLoading && !filtered.length ? (
+        {!schedulesLoading && !filtered.length ? (
           <div className="p-4">
             <EmptyState
               title="Расписаний пока нет"
-              description="Создайте первое расписание для выбранной зоны."
-              actionLabel="Создать расписание"
-              onAction={() => createMutation.mutate()}
+              description={
+                activeZoneFilter === ALL_ZONES_VALUE
+                  ? 'По текущим фильтрам расписания не найдены.'
+                  : 'Создайте первое расписание для выбранной зоны.'
+              }
+              actionLabel="Create schedule"
+              onAction={openCreateDialog}
             />
           </div>
         ) : null}

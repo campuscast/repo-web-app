@@ -1,3 +1,4 @@
+import { z } from 'zod';
 import { apiClient } from '@/services/api-client';
 import {
   publicationSchema,
@@ -5,6 +6,12 @@ import {
   type Publication,
   type PublicationItem,
 } from '@/types/api';
+
+const publicationDeleteResponseSchema = z.object({
+  deleted: z.boolean().default(true),
+  publication_id: z.string(),
+  zone_id: z.string(),
+});
 
 export const publicationService = {
   list: async (
@@ -55,6 +62,12 @@ export const publicationService = {
 
   archive: (publicationId: string) =>
     apiClient.delete(`/publications/${publicationId}`, undefined, publicationSchema),
+
+  restore: (publicationId: string) =>
+    apiClient.post(`/publications/${publicationId}/restore`, undefined, publicationSchema),
+
+  deletePermanent: (publicationId: string) =>
+    apiClient.delete(`/publications/${publicationId}/permanent`, undefined, publicationDeleteResponseSchema),
 };
 
 export type { Publication };

@@ -12,6 +12,7 @@ import {
 test('slide model supports image-only variant through text_overlay=false', () => {
   const editorSlide = toEditorSlideData({
     image_asset_id: 'asset-image',
+    external_url: 'https://example.com/form',
     title: '',
     body: '',
     image_fit: 'contain',
@@ -19,6 +20,7 @@ test('slide model supports image-only variant through text_overlay=false', () =>
   });
 
   assert.equal(editorSlide.imageAssetId, 'asset-image');
+  assert.equal(editorSlide.externalUrl, 'https://example.com/form');
   assert.equal(editorSlide.imageFit, 'contain');
   assert.equal(editorSlide.showTextOverlay, false);
   assert.equal(hasSlideTextContent(editorSlide), false);
@@ -27,6 +29,7 @@ test('slide model supports image-only variant through text_overlay=false', () =>
   const apiSlide = toApiSlideData(editorSlide);
   assert.equal(apiSlide.text_overlay, false);
   assert.equal(apiSlide.image_asset_id, 'asset-image');
+  assert.equal(apiSlide.external_url, 'https://example.com/form');
   assert.equal(apiSlide.image_fit, 'contain');
 });
 

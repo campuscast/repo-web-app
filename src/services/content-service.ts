@@ -46,7 +46,7 @@ export const contentService = {
   deleteAsset: (assetId: string) =>
     apiClient.delete(`/content/${assetId}`),
 
-  list: async (zone: string | string[]) => {
+  listWithUsage: (zone: string | string[]) => {
     const params = new URLSearchParams();
     if (Array.isArray(zone)) {
       if (zone.length > 0) {
@@ -56,13 +56,20 @@ export const contentService = {
       params.set('zone_id', zone);
     }
 
-    const data = await apiClient.get<{ data: ContentAsset[]; pagination: { total: number; page: number; page_size: number } }>(
+    return apiClient.get<{
+      data: ContentAsset[];
+      pagination: { total: number; page: number; page_size: number };
+      publication_usage_by_asset: Record<string, number>;
+    }>(
       `/content?${params.toString()}`,
       contentListResponseSchema
     );
+  },
 
+  list: async (zone: string | string[]) => {
+    const data = await contentService.listWithUsage(zone);
     return data.data;
-  }
+  },
 };
 
 export type { ContentAsset, ContentAssetInfo };

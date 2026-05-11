@@ -4,9 +4,10 @@ import {
   adminUsersListSchema,
   adminUserDetailsSchema,
   adminUserSchema,
+  roleSchema,
   rolesListSchema,
-  type AdminUser,
   type AdminUserDetails,
+  type AdminRole,
 } from '@/types/api';
 
 export async function listUsers(params?: {
@@ -82,18 +83,22 @@ export async function listRoles() {
   return apiClient.get('/roles', rolesListSchema);
 }
 
+export async function getRole(roleId: string): Promise<AdminRole> {
+  return apiClient.get(`/roles/${roleId}`, roleSchema);
+}
+
 export async function createRole(data: {
   name: string;
   permissions: string[];
-}) {
-  return apiClient.post('/roles', data);
+}): Promise<AdminRole> {
+  return apiClient.post('/roles', data, roleSchema);
 }
 
 export async function updateRole(roleId: string, data: {
   name?: string;
   permissions?: string[];
-}) {
-  return apiClient.put(`/roles/${roleId}`, data);
+}): Promise<AdminRole> {
+  return apiClient.put(`/roles/${roleId}`, data, roleSchema);
 }
 
 export async function deleteRole(roleId: string) {

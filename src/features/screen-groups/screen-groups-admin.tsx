@@ -5,6 +5,7 @@ import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 import { useMutation, useQueries, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useRouter } from 'next/navigation';
 import { MoreHorizontal, Plus, Search, Tv } from 'lucide-react';
 import { toast } from 'sonner';
 import { useAuthStore } from '@/auth/store';
@@ -25,6 +26,7 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuSeparator,
   DropdownMenuTrigger
 } from '@/components/ui/dropdown-menu';
 import { Input } from '@/components/ui/input';
@@ -52,6 +54,7 @@ type CreateGroupForm = z.infer<typeof createGroupSchema>;
 const ALL_ZONES_VALUE = '__all_zones__';
 
 export function ScreenGroupsAdmin() {
+  const router = useRouter();
   const queryClient = useQueryClient();
   const roles = useAuthStore((state) => state.roles);
   const allowedZones = useAuthStore((state) => state.zones);
@@ -255,12 +258,12 @@ export function ScreenGroupsAdmin() {
         pageSize={pageSize}
         onPageChange={setPage}
       >
-        <Table>
+        <Table className="table-fixed">
           <TableHeader>
             <TableRow>
-              <TableHead className="pl-4">Group name</TableHead>
-              <TableHead>Description</TableHead>
-              <TableHead>Zone</TableHead>
+              <TableHead className="w-[22%] pl-4">Group name</TableHead>
+              <TableHead className="w-[46%] whitespace-normal">Description</TableHead>
+              <TableHead className="w-[26%]">Zone</TableHead>
               <TableHead className="w-[52px]" />
             </TableRow>
           </TableHeader>
@@ -275,8 +278,8 @@ export function ScreenGroupsAdmin() {
                 ))
               : paged.map((group) => (
                   <TableRow key={group.group_id}>
-                    <TableCell className="pl-4 font-medium">{group.name}</TableCell>
-                    <TableCell className="max-w-[360px] truncate text-muted-foreground">{group.description || '—'}</TableCell>
+                    <TableCell className="max-w-[240px] truncate pl-4 font-medium">{group.name}</TableCell>
+                    <TableCell className="whitespace-normal break-words text-muted-foreground">{group.description || '—'}</TableCell>
                     <TableCell className="text-sm text-muted-foreground">
                       {visibleZones.find((z) => z.zone_id === group.zone_id)?.name ?? group.zone_id}
                     </TableCell>
@@ -288,6 +291,10 @@ export function ScreenGroupsAdmin() {
                           </Button>
                         </DropdownMenuTrigger>
                         <DropdownMenuContent align="end">
+                          <DropdownMenuItem onClick={() => router.push(`/screen-groups/${group.group_id}/compose?zoneId=${group.zone_id}`)}>
+                            Compose
+                          </DropdownMenuItem>
+                          <DropdownMenuSeparator />
                           <DropdownMenuItem
                             className="text-destructive"
                             onClick={() => deleteGroup.mutate({ groupId: group.group_id, zoneId: group.zone_id })}

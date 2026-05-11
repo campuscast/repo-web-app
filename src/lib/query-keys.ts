@@ -3,6 +3,7 @@ export const queryKeys = {
   zonePolicy: (zoneId: string) => ['zones', zoneId, 'policy'] as const,
   zoneGroups: (zoneId: string) => ['zones', zoneId, 'groups'] as const,
   devices: (zoneId: string) => ['devices', zoneId] as const,
+  deviceRuntime: (deviceId: string) => ['devices', deviceId, 'runtime'] as const,
   devicePreview: (deviceId: string) => ['devices', deviceId, 'preview'] as const,
   content: (zoneId: string) => ['content', zoneId] as const,
   schedules: (zoneId: string) => ['schedules', zoneId] as const,

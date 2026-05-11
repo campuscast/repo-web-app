@@ -13,7 +13,11 @@ import {
   Tags,
   Trash2,
   RefreshCw,
-  Save
+  Save,
+  Monitor,
+  Camera,
+  Loader2,
+  ImageIcon
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { ActivationCodeInput } from '@/components/ui/activation-code-input';
@@ -44,7 +48,7 @@ import { formatPlayerId } from '@/lib/player-id';
 import { queryKeys } from '@/lib/query-keys';
 import { deviceService } from '@/services/device-service';
 import { zoneService } from '@/services/zone-service';
-import type { Device } from '@/types/api';
+import type { Device, DevicePreview, DeviceRuntime } from '@/types/api';
 
 /* ─── Constants ────────────────────────────────────────────────── */
 
@@ -71,6 +75,21 @@ function formatStatus(status: string): string {
   return status;
 }
 
+function formatPlaybackStatus(status: string | null | undefined): string {
+  if (!status) return 'Unknown';
+  return status
+    .split('_')
+    .map((chunk) => chunk.charAt(0).toUpperCase() + chunk.slice(1))
+    .join(' ');
+}
+
+function formatDateTime(value: string | null | undefined): string {
+  if (!value) return '—';
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return '—';
+  return parsed.toLocaleString('ru-RU');
+}
+
 const TABS = [
   { id: 'info', label: 'Info', icon: Info },
   { id: 'settings', label: 'Settings', icon: Settings },
@@ -88,10 +107,10 @@ function CopyableValue({ label, value }: { label: string; value: string | null |
   if (!value) return <InfoRow label={label} value="—" />;
 
   return (
-    <div className="flex items-center justify-between px-4 py-3">
+    <div className="flex flex-col gap-2 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
       <span className="text-sm text-muted-foreground">{label}</span>
-      <div className="flex items-center gap-1.5">
-        <code className="max-w-[280px] truncate font-mono text-sm">{value}</code>
+      <div className="flex min-w-0 items-center gap-1.5 self-stretch sm:max-w-[360px] sm:self-auto">
+        <code className="min-w-0 flex-1 truncate font-mono text-sm text-right">{value}</code>
         <Button
           variant="ghost"
           size="icon-xs"
@@ -110,16 +129,24 @@ function CopyableValue({ label, value }: { label: string; value: string | null |
 
 function InfoRow({ label, value }: { label: string; value: string | null | undefined }) {
   return (
-    <div className="flex items-center justify-between px-4 py-3">
+    <div className="flex flex-col gap-2 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
       <span className="text-sm text-muted-foreground">{label}</span>
-      <span className="text-sm font-medium">{value || '—'}</span>
+      <span className="text-sm font-medium sm:text-right">{value || '—'}</span>
     </div>
   );
 }
 
 /* ─── Tab: Info ────────────────────────────────────────────────── */
 
-function TabInfo({ device, onUpdated }: { device: Device; onUpdated: () => void }) {
+function TabInfo({
+  device,
+  runtime,
+  onUpdated
+}: {
+  device: Device;
+  runtime?: DeviceRuntime;
+  onUpdated: () => void;
+}) {
   const [activationCode, setActivationCode] = useState('');
 
   const activateMutation = useMutation({
@@ -134,39 +161,76 @@ function TabInfo({ device, onUpdated }: { device: Device; onUpdated: () => void 
   });
 
   return (
-    <div className="mx-auto max-w-2xl space-y-6">
-      <div>
-        <h3 className="mb-3 text-sm font-semibold">Player parameters</h3>
-        <div className="rounded-lg border divide-y">
-          <CopyableValue label="Player ID" value={formatPlayerId(device.device_id)} />
-          <InfoRow label="Equipment type" value={formatDeviceType(device.device_type)} />
-          <div className="flex items-center justify-between px-4 py-3">
-            <span className="text-sm text-muted-foreground">Status</span>
-            <Badge variant="outline" className={STATUS_STYLES[device.status] ?? ''}>
-              {formatStatus(device.status)}
-            </Badge>
+    <div className="space-y-6">
+      <div className="grid gap-6 xl:grid-cols-[minmax(0,1.15fr)_minmax(0,0.85fr)]">
+        <section className="rounded-lg border p-5">
+          <h3 className="mb-4 text-sm font-semibold">Player parameters</h3>
+          <div className="rounded-lg border divide-y overflow-hidden">
+            <CopyableValue label="Player ID" value={formatPlayerId(device.device_id)} />
+            <InfoRow label="Equipment type" value={formatDeviceType(device.device_type)} />
+            <div className="flex flex-col gap-2 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+              <span className="text-sm text-muted-foreground">Status</span>
+              <Badge variant="outline" className={STATUS_STYLES[device.status] ?? ''}>
+                {formatStatus(device.status)}
+              </Badge>
+            </div>
+            <InfoRow label="MAC address" value={device.hardware_id} />
+            <InfoRow label="MQTT Client ID" value={device.mqtt_client_id} />
+            <InfoRow label="Registered" value={formatDateTime(device.enrolled_at)} />
+            <InfoRow label="Last seen" value={formatDateTime(device.last_seen)} />
+            <InfoRow label="Last telemetry" value={formatDateTime(runtime?.last_telemetry_at)} />
+            <InfoRow label="Playback status" value={formatPlaybackStatus(runtime?.playback_status)} />
+            <InfoRow label="Backend link" value={runtime?.backend_status || '—'} />
+            <InfoRow label="MQTT link" value={runtime?.mqtt_status || '—'} />
           </div>
-          <InfoRow label="MAC address" value={device.hardware_id} />
-          <InfoRow label="MQTT Client ID" value={device.mqtt_client_id} />
-          <InfoRow
-            label="Registered"
-            value={device.enrolled_at ? new Date(device.enrolled_at).toLocaleString('ru-RU') : undefined}
-          />
-          <InfoRow
-            label="Last seen"
-            value={device.last_seen ? new Date(device.last_seen).toLocaleString('ru-RU') : undefined}
-          />
-        </div>
+        </section>
+
+        <section className="rounded-lg border p-5">
+          <h3 className="mb-4 text-sm font-semibold">Detected screens</h3>
+          {runtime?.displays?.length ? (
+            <div className="grid gap-3 lg:grid-cols-2 xl:grid-cols-1 2xl:grid-cols-2">
+              {runtime.displays.map((display) => (
+                <div
+                  key={display.id}
+                  className="flex items-center justify-between gap-4 rounded-md border bg-muted/20 px-4 py-3"
+                >
+                  <div className="min-w-0">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <Monitor className="size-4 text-muted-foreground" />
+                      <p className="truncate text-sm font-medium">{display.label}</p>
+                      {display.selected ? (
+                        <Badge variant="outline" className="border-primary/30 bg-primary/10 text-primary">
+                          Playback target
+                        </Badge>
+                      ) : null}
+                    </div>
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      {display.width} × {display.height} • {display.id}
+                    </p>
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div className="flex min-h-[220px] flex-col items-center justify-center rounded-lg border border-dashed p-8 text-center">
+              <Monitor className="mb-3 size-8 text-muted-foreground/40" />
+              <p className="text-sm font-medium text-muted-foreground">No screen telemetry yet</p>
+              <p className="mt-1 max-w-md text-xs text-muted-foreground">
+                Screen resolutions will appear here after the player activates and sends its first runtime sync.
+              </p>
+            </div>
+          )}
+        </section>
       </div>
 
       {device.status === 'pending' && (
-        <div>
-          <h3 className="mb-3 text-sm font-semibold">Activate player</h3>
-          <div className="rounded-lg border p-4 space-y-3">
-            <p className="text-xs text-muted-foreground">
-              Enter the 6-digit activation code displayed on the player screen.
-            </p>
-            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <section className="rounded-lg border p-5">
+          <h3 className="mb-4 text-sm font-semibold">Activate player</h3>
+          <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_auto] xl:items-end">
+            <div className="space-y-3">
+              <p className="text-xs text-muted-foreground">
+                Enter the 6-digit activation code displayed on the player screen.
+              </p>
               <ActivationCodeInput
                 value={activationCode}
                 onChange={setActivationCode}
@@ -174,16 +238,16 @@ function TabInfo({ device, onUpdated }: { device: Device; onUpdated: () => void 
                 className="justify-start"
                 aria-label="Activation code"
               />
-              <Button
-                className="sm:self-end"
-                disabled={activationCode.length !== 6 || activateMutation.isPending}
-                onClick={() => activateMutation.mutate()}
-              >
-                {activateMutation.isPending ? 'Activating...' : 'Activate'}
-              </Button>
             </div>
+            <Button
+              className="w-full xl:w-auto"
+              disabled={activationCode.length !== 6 || activateMutation.isPending}
+              onClick={() => activateMutation.mutate()}
+            >
+              {activateMutation.isPending ? 'Activating...' : 'Activate'}
+            </Button>
           </div>
-        </div>
+        </section>
       )}
     </div>
   );
@@ -238,88 +302,265 @@ function TabSettings({
   };
 
   return (
-    <div className="mx-auto max-w-2xl space-y-6">
-      <div>
-        <h3 className="mb-3 text-sm font-semibold">Device settings</h3>
-        <div className="space-y-5 rounded-lg border p-5">
+    <div className="space-y-6">
+      <section className="rounded-lg border p-5">
+        <h3 className="mb-4 text-sm font-semibold">Device settings</h3>
+        <div className="grid gap-6 xl:grid-cols-2">
           <form onSubmit={handleRenameSubmit} className="space-y-2">
             <Label htmlFor="player-name">Player name</Label>
-            <div className="flex items-center gap-2">
+            <div className="flex flex-col gap-2 sm:flex-row">
               <Input
                 id="player-name"
-                className="max-w-sm"
+                className="w-full"
                 value={playerName}
                 onChange={(e) => setPlayerName(e.target.value)}
               />
-              {isNameDirty && (
+              {isNameDirty ? (
                 <Button
                   type="submit"
                   size="default"
+                  className="w-full sm:w-auto"
                   disabled={!playerName.trim() || renameMutation.isPending}
                 >
                   <Save className="size-4" />
                   {renameMutation.isPending ? 'Saving...' : 'Save'}
                 </Button>
-              )}
+              ) : null}
             </div>
           </form>
 
-          <div className="space-y-2">
-            <Label>Screen group</Label>
-            <Select
-              value={device.group_id || NO_GROUP_VALUE}
-              onValueChange={(groupId) => assignMutation.mutate(groupId === NO_GROUP_VALUE ? '' : groupId)}
-            >
-              <SelectTrigger className="max-w-sm">
-                <SelectValue placeholder="No group" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value={NO_GROUP_VALUE}>No group</SelectItem>
-                {(groupsQuery.data ?? []).map((group) => (
-                  <SelectItem key={group.group_id} value={group.group_id}>
-                    {group.name}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-
-          <div className="space-y-2">
-            <Label>Equipment type</Label>
-            <Input
-              className="max-w-sm"
-              value={formatDeviceType(device.device_type)}
-              disabled
-            />
-            {!device.device_type && (
+          <div className="space-y-5">
+            <div className="space-y-2">
+              <Label>Screen group</Label>
+              <Select
+                value={device.group_id || NO_GROUP_VALUE}
+                onValueChange={(groupId) => assignMutation.mutate(groupId === NO_GROUP_VALUE ? '' : groupId)}
+              >
+                <SelectTrigger className="w-full">
+                  <SelectValue placeholder="No group" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value={NO_GROUP_VALUE}>No group</SelectItem>
+                  {(groupsQuery.data ?? []).map((group) => (
+                    <SelectItem key={group.group_id} value={group.group_id}>
+                      {group.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
               <p className="text-xs text-muted-foreground">
-                Equipment type will be determined when the player is activated.
+                A player can stay ungrouped and still receive zone-wide schedules and releases.
               </p>
-            )}
+            </div>
+
+            <div className="space-y-2">
+              <Label>Equipment type</Label>
+              <Input className="w-full" value={formatDeviceType(device.device_type)} disabled />
+              {!device.device_type ? (
+                <p className="text-xs text-muted-foreground">
+                  Equipment type will be determined when the player is activated.
+                </p>
+              ) : null}
+            </div>
           </div>
         </div>
-      </div>
+      </section>
     </div>
   );
 }
 
 /* ─── Tab: Content ─────────────────────────────────────────────── */
 
-function TabContent({ device }: { device: Device }) {
+function TabContent({
+  device,
+  runtime
+}: {
+  device: Device;
+  runtime?: DeviceRuntime;
+}) {
+  const queryClient = useQueryClient();
+  const [selectedDisplayId, setSelectedDisplayId] = useState('');
+  const [pendingRequestId, setPendingRequestId] = useState<string | null>(null);
+  const [lockedPreview, setLockedPreview] = useState<DevicePreview | null>(null);
+
+  useEffect(() => {
+    const availableDisplayIds = runtime?.displays.map((display) => display.id) ?? [];
+    if (availableDisplayIds.length === 0) {
+      setSelectedDisplayId('');
+      return;
+    }
+
+    setSelectedDisplayId((current) => {
+      if (current && availableDisplayIds.includes(current)) return current;
+      return runtime?.displays.find((display) => display.selected)?.id ?? availableDisplayIds[0];
+    });
+  }, [runtime?.displays]);
+
+  const previewQuery = useQuery({
+    queryKey: queryKeys.devicePreview(device.device_id),
+    queryFn: () => deviceService.getPreview(device.device_id),
+    refetchInterval: pendingRequestId ? 2000 : false,
+    refetchIntervalInBackground: Boolean(pendingRequestId),
+  });
+
+  useEffect(() => {
+    if (!pendingRequestId || !previewQuery.data) return;
+    if (previewQuery.data.request_id !== pendingRequestId) return;
+
+    setLockedPreview(previewQuery.data);
+    setPendingRequestId(null);
+    if (previewQuery.data.status === 'ok' && (previewQuery.data.image_base64 || previewQuery.data.image_url)) {
+      toast.success('Screenshot updated');
+    } else {
+      toast.error('Player responded, but screenshot capture failed');
+    }
+  }, [pendingRequestId, previewQuery.data]);
+
+  const requestPreviewMutation = useMutation({
+    mutationFn: () => deviceService.requestPreview(device.device_id, selectedDisplayId || undefined),
+    onSuccess: (response) => {
+      setPendingRequestId(response.request_id);
+      toast.message('Screenshot requested. Waiting for the next player sync.');
+      void queryClient.invalidateQueries({ queryKey: queryKeys.deviceRuntime(device.device_id) });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.devicePreview(device.device_id) });
+    },
+    onError: (error) => toast.error(error instanceof Error ? error.message : 'Failed to request screenshot'),
+  });
+
+  const preview = lockedPreview ?? previewQuery.data;
+  const previewSrc = preview?.image_base64 || preview?.image_url || '';
+  const canRequestScreenshot = device.status === 'active'
+    && Boolean(selectedDisplayId)
+    && (runtime?.displays.length ?? 0) > 0;
+
   return (
-    <div className="mx-auto max-w-2xl space-y-6">
-      <div>
-        <h3 className="mb-3 text-sm font-semibold">Currently playing</h3>
-        <div className="flex flex-col items-center justify-center rounded-lg border border-dashed p-12 text-center">
-          <Film className="mb-3 size-10 text-muted-foreground/40" />
-          <p className="text-sm font-medium text-muted-foreground">No active playback</p>
-          <p className="mt-1 text-xs text-muted-foreground">
-            {device.status === 'pending'
-              ? 'Activate this player first to start content playback.'
-              : 'Content status will appear here when the player is connected and playing.'}
+    <div className="space-y-6">
+      <div className="grid gap-6 xl:grid-cols-[minmax(0,1.1fr)_minmax(0,0.9fr)]">
+        <section className="rounded-lg border p-5">
+          <h3 className="mb-4 text-sm font-semibold">Currently playing</h3>
+          <div className="space-y-3">
+            <div className="flex items-center justify-between gap-3">
+              <span className="text-sm text-muted-foreground">Playback status</span>
+              <Badge variant="outline" className={runtime?.playback_status === 'playing' ? STATUS_STYLES.active : ''}>
+                {formatPlaybackStatus(runtime?.playback_status)}
+              </Badge>
+            </div>
+            <div className="flex items-center justify-between gap-3">
+              <span className="text-sm text-muted-foreground">Publication</span>
+              <span className="text-right text-sm font-medium">
+                {runtime?.current_publication_title || '—'}
+              </span>
+            </div>
+            <div className="flex items-center justify-between gap-3">
+              <span className="text-sm text-muted-foreground">Current item</span>
+              <span className="text-right text-sm font-medium">
+                {runtime?.current_publication_item_title || '—'}
+              </span>
+            </div>
+            <div className="flex items-center justify-between gap-3">
+              <span className="text-sm text-muted-foreground">Release</span>
+              <span className="text-right text-sm font-medium">
+                {runtime?.current_release_id || '—'}
+              </span>
+            </div>
+            <div className="flex items-center justify-between gap-3">
+              <span className="text-sm text-muted-foreground">Slot</span>
+              <span className="text-right text-sm font-medium">
+                {runtime?.current_slot_id || '—'}
+              </span>
+            </div>
+            <div className="flex items-center justify-between gap-3">
+              <span className="text-sm text-muted-foreground">Last runtime sync</span>
+              <span className="text-right text-sm font-medium">
+                {formatDateTime(runtime?.last_telemetry_at)}
+              </span>
+            </div>
+            {runtime?.last_error ? (
+              <div className="rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-700 dark:text-amber-300">
+                {runtime.last_error}
+              </div>
+            ) : null}
+          </div>
+        </section>
+
+        <section className="rounded-lg border p-5">
+          <h3 className="mb-4 text-sm font-semibold">Screen capture</h3>
+          <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-end">
+            <div className="space-y-2">
+              <Label>Screen</Label>
+              <Select value={selectedDisplayId} onValueChange={setSelectedDisplayId} disabled={!runtime?.displays.length}>
+                <SelectTrigger className="w-full">
+                  <SelectValue placeholder="Select screen" />
+                </SelectTrigger>
+                <SelectContent>
+                  {(runtime?.displays ?? []).map((display) => (
+                    <SelectItem key={display.id} value={display.id}>
+                      {display.label} ({display.width} × {display.height})
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            <Button
+              onClick={() => requestPreviewMutation.mutate()}
+              disabled={!canRequestScreenshot || requestPreviewMutation.isPending || Boolean(pendingRequestId)}
+              className="w-full whitespace-nowrap lg:w-auto"
+            >
+              {requestPreviewMutation.isPending || pendingRequestId ? (
+                <Loader2 className="size-4 animate-spin" />
+              ) : (
+                <Camera className="size-4" />
+              )}
+              {pendingRequestId ? 'Waiting for screenshot...' : 'Request screenshot'}
+            </Button>
+          </div>
+
+          <p className="mt-4 text-xs text-muted-foreground">
+            Request a single screenshot from the selected screen. The page will only poll while waiting for that screenshot.
           </p>
-        </div>
+        </section>
       </div>
+
+      <section>
+        <h3 className="mb-3 text-sm font-semibold">Requested screenshot</h3>
+        {previewSrc ? (
+          <div className="overflow-hidden rounded-lg border">
+            <img
+              src={previewSrc}
+              alt={preview?.display_label || device.device_name}
+              className="aspect-video w-full bg-muted object-contain"
+            />
+            <div className="flex flex-wrap items-center justify-between gap-3 border-t px-4 py-3 text-xs text-muted-foreground">
+              <span>
+                {preview?.display_label || 'Unknown screen'}
+                {preview?.width && preview?.height ? ` • ${preview.width} × ${preview.height}` : ''}
+              </span>
+              <span>
+                Captured: {formatDateTime(preview?.captured_at)}
+              </span>
+            </div>
+          </div>
+        ) : (
+          <div className="flex flex-col items-center justify-center rounded-lg border border-dashed p-12 text-center">
+            <ImageIcon className="mb-3 size-10 text-muted-foreground/40" />
+            <p className="text-sm font-medium text-muted-foreground">
+              {device.status === 'pending' ? 'No screenshot yet' : 'No screenshot available yet'}
+            </p>
+            <p className="mt-1 text-xs text-muted-foreground">
+              {device.status === 'pending'
+                ? 'Activate this player first to start content playback.'
+                : 'Choose a detected screen and request a screenshot.'}
+            </p>
+          </div>
+        )}
+
+        {preview?.status && preview.status !== 'ok' ? (
+          <p className="mt-3 text-xs text-amber-600 dark:text-amber-400">
+            Player reported screenshot status: {preview.status}
+          </p>
+        ) : null}
+      </section>
     </div>
   );
 }
@@ -328,17 +569,17 @@ function TabContent({ device }: { device: Device }) {
 
 function TabCriteria({ device }: { device: Device }) {
   return (
-    <div className="mx-auto max-w-2xl space-y-6">
-      <div>
-        <h3 className="mb-3 text-sm font-semibold">Criteria & Tags</h3>
-        <div className="flex flex-col items-center justify-center rounded-lg border border-dashed p-12 text-center">
+    <div className="space-y-6">
+      <section className="rounded-lg border p-5">
+        <h3 className="mb-4 text-sm font-semibold">Criteria & Tags</h3>
+        <div className="flex min-h-[260px] flex-col items-center justify-center rounded-lg border border-dashed p-12 text-center">
           <Tags className="mb-3 size-10 text-muted-foreground/40" />
           <p className="text-sm font-medium text-muted-foreground">No criteria configured</p>
-          <p className="mt-1 text-xs text-muted-foreground">
+          <p className="mt-1 max-w-md text-xs text-muted-foreground">
             Tags and targeting criteria allow you to deliver specific content to this player based on its properties.
           </p>
         </div>
-      </div>
+      </section>
     </div>
   );
 }
@@ -357,6 +598,14 @@ export function DeviceDetail({ deviceId }: { deviceId: string }) {
     queryFn: () => deviceService.getDevice(deviceId)
   });
 
+  const runtimeQuery = useQuery({
+    queryKey: queryKeys.deviceRuntime(deviceId),
+    queryFn: () => deviceService.getRuntime(deviceId),
+    enabled: Boolean(deviceId),
+    refetchInterval: activeTab === 'info' || activeTab === 'content' ? 5000 : false,
+    refetchIntervalInBackground: activeTab === 'info' || activeTab === 'content',
+  });
+
   const deleteMutation = useMutation({
     mutationFn: () => deviceService.deleteDevice(deviceId),
     onSuccess: () => {
@@ -371,6 +620,8 @@ export function DeviceDetail({ deviceId }: { deviceId: string }) {
 
   const handleRefresh = () => {
     queryClient.invalidateQueries({ queryKey: ['device', deviceId] });
+    queryClient.invalidateQueries({ queryKey: queryKeys.deviceRuntime(deviceId) });
+    queryClient.invalidateQueries({ queryKey: queryKeys.devicePreview(deviceId) });
   };
 
   const handleBack = () => {
@@ -484,9 +735,9 @@ export function DeviceDetail({ deviceId }: { deviceId: string }) {
 
       {/* Tab content */}
       <div className="rounded-lg border bg-card p-6">
-        {activeTab === 'info' && <TabInfo device={device} onUpdated={handleRefresh} />}
+        {activeTab === 'info' && <TabInfo device={device} runtime={runtimeQuery.data} onUpdated={handleRefresh} />}
         {activeTab === 'settings' && <TabSettings device={device} onUpdated={handleRefresh} />}
-        {activeTab === 'content' && <TabContent device={device} />}
+        {activeTab === 'content' && <TabContent device={device} runtime={runtimeQuery.data} />}
         {activeTab === 'criteria' && <TabCriteria device={device} />}
       </div>
     </div>

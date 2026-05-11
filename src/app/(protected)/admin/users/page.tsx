@@ -1,39 +1,76 @@
 'use client';
 
-import { useEffect, useState, useCallback } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { toast } from 'sonner';
 import {
-  Plus, Search, RotateCw, UserX, KeyRound, Shield, UserCheck, Trash2, Clipboard,
+  Clipboard,
+  KeyRound,
+  MoreHorizontal,
+  Plus,
+  RotateCw,
+  Search,
+  Shield,
+  Trash2,
+  UserCheck,
+  UserX,
 } from 'lucide-react';
-import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { Badge } from '@/components/ui/badge';
-import {
-  Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
-} from '@/components/ui/table';
-import {
-  Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
-} from '@/components/ui/dialog';
-import {
-  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
-} from '@/components/ui/select';
-import {
-  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
-  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
-} from '@/components/ui/alert-dialog';
-import { Label } from '@/components/ui/label';
+import { DataTable } from '@/components/common/data-table';
 import { PageHeader } from '@/components/common/page-header';
 import { useAuthStore } from '@/auth/store';
 import { useLocale } from '@/hooks/use-locale';
+import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
 import {
-  listUsers, getUser, createUser, updateUser, deactivateUser,
-  restoreUser, deleteUserPermanently, adminResetPassword, listRoles, assignRole, removeRole,
+  Dialog,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '@/components/ui/table';
+import {
+  adminResetPassword,
+  createUser,
+  deactivateUser,
+  deleteUserPermanently,
+  getUser,
+  listRoles,
+  listUsers,
+  restoreUser,
+  updateUser,
 } from '@/services/user-admin-service';
 import { zoneService } from '@/services/zone-service';
-import type { AdminUser, AdminRole, Zone } from '@/types/api';
+import type { AdminRole, AdminUser, Zone } from '@/types/api';
 
 const MAX_USER_LOGIN_LENGTH = 20;
 const MAX_USER_NAME_LENGTH = 20;
+const PAGE_SIZE = 20;
 
 export default function UsersAdminPage() {
   const { t } = useLocale();
@@ -50,7 +87,6 @@ export default function UsersAdminPage() {
   const [roles, setRoles] = useState<AdminRole[]>([]);
   const [zones, setZones] = useState<Zone[]>([]);
 
-  // Create dialog
   const [createOpen, setCreateOpen] = useState(false);
   const [createForm, setCreateForm] = useState({
     email: '',
@@ -63,7 +99,6 @@ export default function UsersAdminPage() {
   const [createNameLimitNotified, setCreateNameLimitNotified] = useState(false);
   const [createdCredentials, setCreatedCredentials] = useState<{ login: string; temporary_password: string } | null>(null);
 
-  // Edit dialog
   const [editUser, setEditUser] = useState<AdminUser | null>(null);
   const [editForm, setEditForm] = useState({
     name: '',
@@ -75,12 +110,10 @@ export default function UsersAdminPage() {
   const [editLoginLimitNotified, setEditLoginLimitNotified] = useState(false);
   const [editNameLimitNotified, setEditNameLimitNotified] = useState(false);
 
-  // Deactivate dialog
   const [deactivateTarget, setDeactivateTarget] = useState<AdminUser | null>(null);
   const [restoreTarget, setRestoreTarget] = useState<AdminUser | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<AdminUser | null>(null);
 
-  // Reset password dialog
   const [resetTarget, setResetTarget] = useState<AdminUser | null>(null);
   const [tempPassword, setTempPassword] = useState<string | null>(null);
 
@@ -93,10 +126,11 @@ export default function UsersAdminPage() {
       setLoading(false);
       return;
     }
+
     setLoading(true);
     try {
       const [usersResult, rolesResult, zonesResult] = await Promise.all([
-        listUsers({ page, page_size: 20, search: search || undefined }),
+        listUsers({ page, page_size: PAGE_SIZE, search: search || undefined }),
         listRoles(),
         zoneService.listZones(),
       ]);
@@ -104,14 +138,23 @@ export default function UsersAdminPage() {
       setTotal(usersResult.pagination.total);
       setRoles(rolesResult.data);
       setZones(zonesResult);
-    } catch (e: any) {
-      toast.error(e.message || t('users.toast.loadFailed'));
+    } catch (error: unknown) {
+      toast.error(error instanceof Error ? error.message : t('users.toast.loadFailed'));
     } finally {
       setLoading(false);
     }
   }, [canRead, page, search, t]);
 
-  useEffect(() => { load(); }, [load]);
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  useEffect(() => {
+    const pageCount = Math.max(1, Math.ceil(total / PAGE_SIZE));
+    if (page > pageCount) {
+      setPage(pageCount);
+    }
+  }, [page, total]);
 
   if (!canRead) {
     return (
@@ -137,9 +180,7 @@ export default function UsersAdminPage() {
     }
 
     if (!limitNotified) {
-      toast.error(
-        t('users.toast.maxLength', { field: fieldLabel, max: maxLength }),
-      );
+      toast.error(t('users.toast.maxLength', { field: fieldLabel, max: maxLength }));
       setLimitNotified(true);
     }
     return rawValue.slice(0, maxLength);
@@ -163,12 +204,11 @@ export default function UsersAdminPage() {
       setCreateNameLimitNotified(false);
       setCreatedCredentials({
         login: created.email,
-        temporary_password:
-          created.temporary_password || t('common.notAvailable'),
+        temporary_password: created.temporary_password || t('common.notAvailable'),
       });
-      load();
-    } catch (e: any) {
-      toast.error(e.message || t('users.toast.userCreateFailed'));
+      void load();
+    } catch (error: unknown) {
+      toast.error(error instanceof Error ? error.message : t('users.toast.userCreateFailed'));
     } finally {
       setCreating(false);
     }
@@ -186,9 +226,9 @@ export default function UsersAdminPage() {
       await updateUser(editUser.id, editForm);
       toast.success(t('users.toast.userUpdated'));
       setEditUser(null);
-      load();
-    } catch (e: any) {
-      toast.error(e.message || t('users.toast.userUpdateFailed'));
+      void load();
+    } catch (error: unknown) {
+      toast.error(error instanceof Error ? error.message : t('users.toast.userUpdateFailed'));
     } finally {
       setSaving(false);
     }
@@ -210,9 +250,9 @@ export default function UsersAdminPage() {
       await deactivateUser(deactivateTarget.id);
       toast.success(t('users.toast.userDeactivated'));
       setDeactivateTarget(null);
-      load();
-    } catch (e: any) {
-      toast.error(e.message || t('users.toast.userDeactivateFailed'));
+      void load();
+    } catch (error: unknown) {
+      toast.error(error instanceof Error ? error.message : t('users.toast.userDeactivateFailed'));
     }
   };
 
@@ -227,9 +267,9 @@ export default function UsersAdminPage() {
       await restoreUser(restoreTarget.id);
       toast.success(t('users.toast.userRestored'));
       setRestoreTarget(null);
-      load();
-    } catch (e: any) {
-      toast.error(e.message || t('users.toast.userRestoreFailed'));
+      void load();
+    } catch (error: unknown) {
+      toast.error(error instanceof Error ? error.message : t('users.toast.userRestoreFailed'));
     }
   };
 
@@ -249,9 +289,9 @@ export default function UsersAdminPage() {
       await deleteUserPermanently(deleteTarget.id);
       toast.success(t('users.toast.userDeleted'));
       setDeleteTarget(null);
-      load();
-    } catch (e: any) {
-      toast.error(e.message || t('users.toast.userDeleteFailed'));
+      void load();
+    } catch (error: unknown) {
+      toast.error(error instanceof Error ? error.message : t('users.toast.userDeleteFailed'));
     }
   };
 
@@ -266,8 +306,8 @@ export default function UsersAdminPage() {
       const result = await adminResetPassword(resetTarget.id);
       setTempPassword(result.temporary_password);
       toast.success(t('users.toast.passwordReset'));
-    } catch (e: any) {
-      toast.error(e.message || t('users.toast.passwordResetFailed'));
+    } catch (error: unknown) {
+      toast.error(error instanceof Error ? error.message : t('users.toast.passwordResetFailed'));
     }
   };
 
@@ -282,7 +322,7 @@ export default function UsersAdminPage() {
     setEditForm({
       name: user.name || '',
       email: user.email,
-      role_ids: user.roles.map(r => r.id),
+      role_ids: user.roles.map((role) => role.id),
       zone_ids: [],
     });
 
@@ -295,158 +335,185 @@ export default function UsersAdminPage() {
         zone_ids: details.zones.map((zone) => zone.zone_id),
       });
     } catch {
-      // keep base form state if details endpoint fails
+      // Keep base form state if details endpoint fails.
     }
   };
 
   const toggleRole = (roleId: string, current: string[], setter: (ids: string[]) => void) => {
     if (current.includes(roleId)) {
-      setter(current.filter(id => id !== roleId));
-    } else {
-      setter([...current, roleId]);
+      setter(current.filter((id) => id !== roleId));
+      return;
     }
+    setter([...current, roleId]);
   };
 
   return (
-    <div className="space-y-6">
-      <PageHeader
-        description={t('users.description')}
-        actions={
-          canWrite ? (
-            <Button onClick={() => setCreateOpen(true)} size="sm">
-              <Plus className="mr-1.5 size-4" />
-              {t('users.createUser')}
-            </Button>
-          ) : null
-        }
-      />
+    <div className="space-y-4">
+      <PageHeader description={t('users.description')} />
 
-      <div className="flex items-center gap-3">
-        <div className="relative flex-1 max-w-sm">
-          <Search className="absolute left-2.5 top-2.5 size-4 text-muted-foreground" />
-          <Input
-            className="pl-9"
-            placeholder={t('users.searchPlaceholder')}
-            value={search}
-            onChange={(e) => { setSearch(e.target.value); setPage(1); }}
-          />
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex flex-1 flex-wrap items-center gap-2">
+          <div className="relative w-full max-w-xs">
+            <Search className="pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+            <Input
+              className="h-8 pl-8"
+              placeholder={t('users.searchPlaceholder')}
+              value={search}
+              onChange={(event) => {
+                setSearch(event.target.value);
+                setPage(1);
+              }}
+            />
+          </div>
+          <Button
+            variant="outline"
+            size="icon"
+            className="h-8 w-8 shrink-0"
+            onClick={() => void load()}
+            disabled={loading}
+          >
+            <RotateCw className={`size-4 ${loading ? 'animate-spin' : ''}`} />
+            <span className="sr-only">{t('users.refresh')}</span>
+          </Button>
         </div>
-        <Button variant="outline" size="icon" onClick={load} disabled={loading}>
-          <RotateCw className={`size-4 ${loading ? 'animate-spin' : ''}`} />
-        </Button>
+
+        {canWrite ? (
+          <Button className="h-8 self-start sm:self-auto" onClick={() => setCreateOpen(true)}>
+            <Plus className="size-4" />
+            {t('users.newUser')}
+          </Button>
+        ) : null}
       </div>
 
-      <div className="rounded-md border">
+      <DataTable
+        total={total}
+        page={page}
+        pageSize={PAGE_SIZE}
+        onPageChange={setPage}
+      >
         <Table>
           <TableHeader>
             <TableRow>
-              <TableHead>{t('users.tableUser')}</TableHead>
+              <TableHead className="pl-4">{t('users.tableUser')}</TableHead>
               <TableHead>{t('users.tableRoles')}</TableHead>
               <TableHead>{t('users.tableStatus')}</TableHead>
               <TableHead>{t('users.tableCreated')}</TableHead>
-              {canWrite && <TableHead className="text-right">{t('users.tableActions')}</TableHead>}
+              {canWrite ? (
+                <TableHead className="w-[52px]">
+                  <span className="sr-only">{t('users.tableActions')}</span>
+                </TableHead>
+              ) : null}
             </TableRow>
           </TableHeader>
           <TableBody>
-            {users.map((user) => {
+            {loading ? (
+              <TableRow>
+                <TableCell colSpan={canWrite ? 5 : 4} className="py-6 text-center text-sm text-muted-foreground">
+                  {t('common.loading')}
+                </TableCell>
+              </TableRow>
+            ) : users.map((user) => {
               const isProtectedSuperAdmin = isSuperAdminUser(user);
 
               return (
-              <TableRow key={user.id}>
-                <TableCell>
-                  <div className="font-medium">{user.name || user.email}</div>
-                  <div className="text-xs text-muted-foreground">{user.email}</div>
-                </TableCell>
-                <TableCell>
-                  <div className="flex flex-wrap gap-1">
-                    {user.roles.map((role) => (
-                      <Badge key={role.id} variant="secondary" className="text-xs">
-                        {role.name}
+                <TableRow key={user.id}>
+                  <TableCell className="pl-4">
+                    <div className="font-medium">{user.name || user.email}</div>
+                    <div className="text-xs text-muted-foreground">{user.email}</div>
+                  </TableCell>
+                  <TableCell>
+                    <div className="flex flex-wrap gap-1">
+                      {user.roles.map((role) => (
+                        <Badge key={role.id} variant="secondary" className="text-xs">
+                          {role.name}
+                        </Badge>
+                      ))}
+                    </div>
+                  </TableCell>
+                  <TableCell>
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      <Badge variant={user.status === 'active' ? 'default' : 'destructive'}>
+                        {user.status}
                       </Badge>
-                    ))}
-                  </div>
-                </TableCell>
-                <TableCell>
-                  <Badge variant={user.status === 'active' ? 'default' : 'destructive'}>
-                    {user.status}
-                  </Badge>
-                  <span
-                    className={`ml-2 inline-block size-2 rounded-full align-middle ${user.online ? 'bg-green-500' : 'bg-destructive'}`}
-                    title={user.online ? t('users.statusOnline') : t('users.statusOffline')}
-                    aria-label={user.online ? t('users.statusOnline') : t('users.statusOffline')}
-                  />
-                  {user.must_change_password && (
-                    <Badge variant="outline" className="ml-1 text-xs">{t('users.badgeMustChangePwd')}</Badge>
-                  )}
-                  {isProtectedSuperAdmin && (
-                    <Badge variant="outline" className="ml-1 text-xs">{t('users.badgeProtected')}</Badge>
-                  )}
-                </TableCell>
-                <TableCell className="text-sm text-muted-foreground">
-                  {user.created_at ? new Date(user.created_at).toLocaleDateString() : '-'}
-                </TableCell>
-                {canWrite && (
-                  <TableCell className="text-right">
-                    <div className="flex justify-end gap-1">
-                      {!isProtectedSuperAdmin ? (
-                        <>
-                          <Button variant="ghost" size="icon" onClick={() => { void openEdit(user); }} title={t('users.actionEdit')}>
-                            <Shield className="size-4" />
-                          </Button>
-                          <Button variant="ghost" size="icon" onClick={() => { setResetTarget(user); setTempPassword(null); }} title={t('users.actionResetPassword')}>
-                            <KeyRound className="size-4" />
-                          </Button>
-                          {user.status === 'active' && user.id !== currentUserId && (
-                            <Button variant="ghost" size="icon" onClick={() => setDeactivateTarget(user)} title={t('users.actionDeactivate')}>
-                              <UserX className="size-4" />
-                            </Button>
-                          )}
-                          {user.status !== 'active' && user.id !== currentUserId && (
-                            <Button variant="ghost" size="icon" onClick={() => setRestoreTarget(user)} title={t('users.actionRestore')}>
-                              <UserCheck className="size-4" />
-                            </Button>
-                          )}
-                          {user.id !== currentUserId && (
-                            <Button variant="ghost" size="icon" onClick={() => setDeleteTarget(user)} title={t('users.actionDeletePermanent')}>
-                              <Trash2 className="size-4" />
-                            </Button>
-                          )}
-                        </>
+                      <span
+                        className={`inline-block size-2 rounded-full ${user.online ? 'bg-emerald-500' : 'bg-slate-400'}`}
+                        title={user.online ? t('users.statusOnline') : t('users.statusOffline')}
+                        aria-label={user.online ? t('users.statusOnline') : t('users.statusOffline')}
+                      />
+                      {user.must_change_password ? (
+                        <Badge variant="outline" className="text-xs">
+                          {t('users.badgeMustChangePwd')}
+                        </Badge>
+                      ) : null}
+                      {isProtectedSuperAdmin ? (
+                        <Badge variant="outline" className="text-xs">
+                          {t('users.badgeProtected')}
+                        </Badge>
                       ) : null}
                     </div>
                   </TableCell>
-                )}
-              </TableRow>
+                  <TableCell className="text-sm text-muted-foreground">
+                    {user.created_at ? new Date(user.created_at).toLocaleDateString() : '-'}
+                  </TableCell>
+                  {canWrite ? (
+                    <TableCell className="w-[52px]">
+                      {!isProtectedSuperAdmin ? (
+                        <DropdownMenu>
+                          <DropdownMenuTrigger asChild>
+                            <Button variant="ghost" size="icon">
+                              <MoreHorizontal className="size-4" />
+                              <span className="sr-only">{t('users.tableActions')}</span>
+                            </Button>
+                          </DropdownMenuTrigger>
+                          <DropdownMenuContent align="end" className="min-w-44">
+                            <DropdownMenuItem onClick={() => { void openEdit(user); }}>
+                              <Shield className="size-4" />
+                              {t('users.actionEdit')}
+                            </DropdownMenuItem>
+                            <DropdownMenuItem onClick={() => { setResetTarget(user); setTempPassword(null); }}>
+                              <KeyRound className="size-4" />
+                              {t('users.actionResetPassword')}
+                            </DropdownMenuItem>
+                            {user.status === 'active' && user.id !== currentUserId ? (
+                              <DropdownMenuItem variant="destructive" onClick={() => setDeactivateTarget(user)}>
+                                <UserX className="size-4" />
+                                {t('users.actionDeactivate')}
+                              </DropdownMenuItem>
+                            ) : null}
+                            {user.status !== 'active' && user.id !== currentUserId ? (
+                              <DropdownMenuItem onClick={() => setRestoreTarget(user)}>
+                                <UserCheck className="size-4" />
+                                {t('users.actionRestore')}
+                              </DropdownMenuItem>
+                            ) : null}
+                            {user.id !== currentUserId ? (
+                              <>
+                                <DropdownMenuSeparator />
+                                <DropdownMenuItem variant="destructive" onClick={() => setDeleteTarget(user)}>
+                                  <Trash2 className="size-4" />
+                                  {t('users.actionDeletePermanent')}
+                                </DropdownMenuItem>
+                              </>
+                            ) : null}
+                          </DropdownMenuContent>
+                        </DropdownMenu>
+                      ) : null}
+                    </TableCell>
+                  ) : null}
+                </TableRow>
               );
             })}
-            {!loading && users.length === 0 && (
+            {!loading && users.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={canWrite ? 5 : 4} className="text-center py-8 text-muted-foreground">
+                <TableCell colSpan={canWrite ? 5 : 4} className="py-8 text-center text-muted-foreground">
                   {t('users.empty')}
                 </TableCell>
               </TableRow>
-            )}
+            ) : null}
           </TableBody>
         </Table>
-      </div>
+      </DataTable>
 
-      {total > 20 && (
-        <div className="flex items-center justify-between">
-          <span className="text-sm text-muted-foreground">
-            {t('users.page', { page, total: Math.ceil(total / 20) })}
-          </span>
-          <div className="flex gap-2">
-            <Button variant="outline" size="sm" disabled={page <= 1} onClick={() => setPage(p => p - 1)}>
-              {t('users.previous')}
-            </Button>
-            <Button variant="outline" size="sm" disabled={page * 20 >= total} onClick={() => setPage(p => p + 1)}>
-              {t('users.next')}
-            </Button>
-          </div>
-        </div>
-      )}
-
-      {/* Create User Dialog */}
       <Dialog
         open={createOpen}
         onOpenChange={(open) => {
@@ -467,15 +534,15 @@ export default function UsersAdminPage() {
               <Label>{t('users.login')}</Label>
               <Input
                 value={createForm.email}
-                onChange={(e) => {
+                onChange={(event) => {
                   const next = enforceLength(
-                    e.target.value,
+                    event.target.value,
                     MAX_USER_LOGIN_LENGTH,
                     t('users.login'),
                     createLoginLimitNotified,
                     setCreateLoginLimitNotified,
                   );
-                  setCreateForm((f) => ({ ...f, email: next }));
+                  setCreateForm((form) => ({ ...form, email: next }));
                 }}
               />
             </div>
@@ -483,15 +550,15 @@ export default function UsersAdminPage() {
               <Label>{t('users.name')}</Label>
               <Input
                 value={createForm.name}
-                onChange={(e) => {
+                onChange={(event) => {
                   const next = enforceLength(
-                    e.target.value,
+                    event.target.value,
                     MAX_USER_NAME_LENGTH,
                     t('users.name'),
                     createNameLimitNotified,
                     setCreateNameLimitNotified,
                   );
-                  setCreateForm((f) => ({ ...f, name: next }));
+                  setCreateForm((form) => ({ ...form, name: next }));
                 }}
               />
             </div>
@@ -503,7 +570,7 @@ export default function UsersAdminPage() {
                     key={role.id}
                     variant={createForm.role_ids.includes(role.id) ? 'default' : 'outline'}
                     className="cursor-pointer"
-                    onClick={() => toggleRole(role.id, createForm.role_ids, ids => setCreateForm(f => ({ ...f, role_ids: ids })))}
+                    onClick={() => toggleRole(role.id, createForm.role_ids, (roleIds) => setCreateForm((form) => ({ ...form, role_ids: roleIds })))}
                   >
                     {role.name}
                   </Badge>
@@ -518,7 +585,7 @@ export default function UsersAdminPage() {
                     key={zone.zone_id}
                     variant={createForm.zone_ids.includes(zone.zone_id) ? 'default' : 'outline'}
                     className="cursor-pointer"
-                    onClick={() => toggleRole(zone.zone_id, createForm.zone_ids, ids => setCreateForm(f => ({ ...f, zone_ids: ids })))}
+                    onClick={() => toggleRole(zone.zone_id, createForm.zone_ids, (zoneIds) => setCreateForm((form) => ({ ...form, zone_ids: zoneIds })))}
                   >
                     {zone.name}
                   </Badge>
@@ -535,7 +602,7 @@ export default function UsersAdminPage() {
         </DialogContent>
       </Dialog>
 
-      <Dialog open={!!createdCredentials} onOpenChange={(open) => !open && setCreatedCredentials(null)}>
+      <Dialog open={Boolean(createdCredentials)} onOpenChange={(open) => !open && setCreatedCredentials(null)}>
         <DialogContent>
           <DialogHeader>
             <DialogTitle>{t('users.userCreated')}</DialogTitle>
@@ -585,8 +652,7 @@ export default function UsersAdminPage() {
         </DialogContent>
       </Dialog>
 
-      {/* Edit User Dialog */}
-      <Dialog open={!!editUser} onOpenChange={(open) => !open && setEditUser(null)}>
+      <Dialog open={Boolean(editUser)} onOpenChange={(open) => !open && setEditUser(null)}>
         <DialogContent>
           <DialogHeader>
             <DialogTitle>{t('users.editUser')}</DialogTitle>
@@ -596,15 +662,15 @@ export default function UsersAdminPage() {
               <Label>{t('users.login')}</Label>
               <Input
                 value={editForm.email}
-                onChange={(e) => {
+                onChange={(event) => {
                   const next = enforceLength(
-                    e.target.value,
+                    event.target.value,
                     MAX_USER_LOGIN_LENGTH,
                     t('users.login'),
                     editLoginLimitNotified,
                     setEditLoginLimitNotified,
                   );
-                  setEditForm((f) => ({ ...f, email: next }));
+                  setEditForm((form) => ({ ...form, email: next }));
                 }}
               />
             </div>
@@ -612,15 +678,15 @@ export default function UsersAdminPage() {
               <Label>{t('users.name')}</Label>
               <Input
                 value={editForm.name}
-                onChange={(e) => {
+                onChange={(event) => {
                   const next = enforceLength(
-                    e.target.value,
+                    event.target.value,
                     MAX_USER_NAME_LENGTH,
                     t('users.name'),
                     editNameLimitNotified,
                     setEditNameLimitNotified,
                   );
-                  setEditForm((f) => ({ ...f, name: next }));
+                  setEditForm((form) => ({ ...form, name: next }));
                 }}
               />
             </div>
@@ -632,7 +698,7 @@ export default function UsersAdminPage() {
                     key={role.id}
                     variant={editForm.role_ids.includes(role.id) ? 'default' : 'outline'}
                     className="cursor-pointer"
-                    onClick={() => toggleRole(role.id, editForm.role_ids, ids => setEditForm(f => ({ ...f, role_ids: ids })))}
+                    onClick={() => toggleRole(role.id, editForm.role_ids, (roleIds) => setEditForm((form) => ({ ...form, role_ids: roleIds })))}
                   >
                     {role.name}
                   </Badge>
@@ -647,7 +713,7 @@ export default function UsersAdminPage() {
                     key={zone.zone_id}
                     variant={editForm.zone_ids.includes(zone.zone_id) ? 'default' : 'outline'}
                     className="cursor-pointer"
-                    onClick={() => toggleRole(zone.zone_id, editForm.zone_ids, ids => setEditForm(f => ({ ...f, zone_ids: ids })))}
+                    onClick={() => toggleRole(zone.zone_id, editForm.zone_ids, (zoneIds) => setEditForm((form) => ({ ...form, zone_ids: zoneIds })))}
                   >
                     {zone.name}
                   </Badge>
@@ -664,8 +730,7 @@ export default function UsersAdminPage() {
         </DialogContent>
       </Dialog>
 
-      {/* Deactivate Confirm */}
-      <AlertDialog open={!!deactivateTarget} onOpenChange={(open) => !open && setDeactivateTarget(null)}>
+      <AlertDialog open={Boolean(deactivateTarget)} onOpenChange={(open) => !open && setDeactivateTarget(null)}>
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>{t('users.deactivateTitle')}</AlertDialogTitle>
@@ -680,7 +745,7 @@ export default function UsersAdminPage() {
         </AlertDialogContent>
       </AlertDialog>
 
-      <AlertDialog open={!!restoreTarget} onOpenChange={(open) => !open && setRestoreTarget(null)}>
+      <AlertDialog open={Boolean(restoreTarget)} onOpenChange={(open) => !open && setRestoreTarget(null)}>
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>{t('users.restoreTitle')}</AlertDialogTitle>
@@ -695,7 +760,7 @@ export default function UsersAdminPage() {
         </AlertDialogContent>
       </AlertDialog>
 
-      <AlertDialog open={!!deleteTarget} onOpenChange={(open) => !open && setDeleteTarget(null)}>
+      <AlertDialog open={Boolean(deleteTarget)} onOpenChange={(open) => !open && setDeleteTarget(null)}>
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>{t('users.deleteTitle')}</AlertDialogTitle>
@@ -710,15 +775,22 @@ export default function UsersAdminPage() {
         </AlertDialogContent>
       </AlertDialog>
 
-      {/* Reset Password Dialog */}
-      <Dialog open={!!resetTarget} onOpenChange={(open) => { if (!open) { setResetTarget(null); setTempPassword(null); } }}>
+      <Dialog
+        open={Boolean(resetTarget)}
+        onOpenChange={(open) => {
+          if (!open) {
+            setResetTarget(null);
+            setTempPassword(null);
+          }
+        }}
+      >
         <DialogContent>
           <DialogHeader>
             <DialogTitle>{t('users.resetTitle')}</DialogTitle>
           </DialogHeader>
           {!tempPassword ? (
             <div>
-              <p className="text-sm text-muted-foreground mb-4">
+              <p className="mb-4 text-sm text-muted-foreground">
                 {t('users.resetDescription', { email: resetTarget?.email ?? '-' })}
               </p>
               <DialogFooter>
@@ -728,13 +800,13 @@ export default function UsersAdminPage() {
             </div>
           ) : (
             <div>
-              <p className="text-sm text-muted-foreground mb-2">
+              <p className="mb-2 text-sm text-muted-foreground">
                 {t('users.tempFor', { email: resetTarget?.email ?? '-' })}
               </p>
-              <code className="block p-3 bg-muted rounded text-sm font-mono select-all">
+              <code className="block rounded bg-muted p-3 text-sm font-mono select-all">
                 {tempPassword}
               </code>
-              <p className="text-xs text-muted-foreground mt-2">
+              <p className="mt-2 text-xs text-muted-foreground">
                 {t('users.copyShare')}
               </p>
               <DialogFooter className="mt-4">

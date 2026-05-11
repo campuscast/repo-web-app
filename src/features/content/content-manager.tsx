@@ -79,7 +79,6 @@ import {
 } from '@/components/ui/tooltip';
 import { queryKeys } from '@/lib/query-keys';
 import { contentService } from '@/services/content-service';
-import { scheduleService } from '@/services/schedule-service';
 import { zoneService } from '@/services/zone-service';
 import type { ContentAsset } from '@/types/api';
 
@@ -416,27 +415,13 @@ export function ContentManager() {
 
   const contentQuery = useQuery({
     queryKey: contentQueryKey,
-    queryFn: () => contentService.list(listedZoneIds),
+    queryFn: () => contentService.listWithUsage(listedZoneIds),
     enabled: listedZoneIds.length > 0,
   });
 
-  const usageQuery = useQuery({
-    queryKey: listedZoneIds.length ? ['schedule', 'usage', 'zones', ...listedZoneIds] : ['schedule', 'usage', 'none'],
-    queryFn: async () => {
-      const usages = await Promise.all(listedZoneIds.map((zoneId) => scheduleService.getUsage(zoneId)));
-      return usages.reduce<Record<string, number>>((accumulator, usage) => {
-        for (const [assetId, count] of Object.entries(usage.assets ?? {})) {
-          accumulator[assetId] = (accumulator[assetId] ?? 0) + count;
-        }
-        return accumulator;
-      }, {});
-    },
-    enabled: listedZoneIds.length > 0,
-  });
-
-  const usageCountMap = useMemo<Record<string, number>>(() => {
-    return usageQuery.data ?? {};
-  }, [usageQuery.data]);
+  const publicationUsageCountMap = useMemo<Record<string, number>>(() => {
+    return contentQuery.data?.publication_usage_by_asset ?? {};
+  }, [contentQuery.data]);
 
   const infoQuery = useQuery({
     queryKey: infoTarget ? assetInfoQueryKey(infoTarget.asset_id) : ['content', 'asset', 'none', 'info'],
@@ -632,7 +617,7 @@ export function ContentManager() {
   }, [infoQuery.data, pruneAvailabilityMutation]);
 
   const filtered = useMemo(() => {
-    const rows = contentQuery.data ?? [];
+    const rows = contentQuery.data?.data ?? [];
     const lowered = search.toLowerCase();
     return rows.filter((asset) => asset.filename.toLowerCase().includes(lowered));
   }, [contentQuery.data, search]);
@@ -793,7 +778,7 @@ export function ContentManager() {
                     <TableHead className="pl-4">Filename</TableHead>
                     <TableHead>Zone</TableHead>
                     <TableHead>Type</TableHead>
-                    <TableHead className="text-center">Used in</TableHead>
+                    <TableHead className="text-center">Used in publications</TableHead>
                     <TableHead className="w-[52px]" />
                   </TableRow>
                 </TableHeader>
@@ -807,8 +792,8 @@ export function ContentManager() {
                         </TableRow>
                       ))
                     : paged.map((asset) => {
-                        const usageCount = usageCountMap[asset.asset_id] ?? 0;
-                        const isUsed = usageCount > 0;
+                        const publicationUsageCount = publicationUsageCountMap[asset.asset_id] ?? 0;
+                        const isUsed = publicationUsageCount > 0;
                         const zoneBadges = (asset.zone_ids.length > 0 ? asset.zone_ids : [asset.zone_id])
                           .filter(Boolean)
                           .map((zoneId) => ({
@@ -819,12 +804,12 @@ export function ContentManager() {
                         const renameBlockedReason = hasScopedAwayZones
                           ? 'Shared with zones outside your access scope — cannot rename'
                           : isUsed
-                            ? `Used in ${usageCount} schedule slot${usageCount > 1 ? 's' : ''} — cannot rename`
+                            ? `Used in ${publicationUsageCount} publication${publicationUsageCount > 1 ? 's' : ''} — cannot rename`
                             : '';
                         const deleteBlockedReason = hasScopedAwayZones
                           ? 'Shared with zones outside your access scope — cannot delete'
                           : isUsed
-                            ? `Used in ${usageCount} schedule slot${usageCount > 1 ? 's' : ''} — cannot delete`
+                            ? `Used in ${publicationUsageCount} publication${publicationUsageCount > 1 ? 's' : ''} — cannot delete`
                             : '';
 
                         return (
@@ -856,7 +841,7 @@ export function ContentManager() {
                             <TableCell className="text-center">
                               {isUsed ? (
                                 <span className="inline-flex items-center justify-center rounded-full bg-primary/10 px-2 py-0.5 text-xs font-semibold text-primary tabular-nums">
-                                  {usageCount}
+                                  {publicationUsageCount}
                                 </span>
                               ) : (
                                 <span className="text-xs text-muted-foreground">—</span>
