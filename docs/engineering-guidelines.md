@@ -1,246 +1,118 @@
 # Engineering Guidelines
 
-This document defines the architectural constraints, technology stack, and operational rules for the **repo-web-app** project.
+This document records the architecture boundaries and trade-offs that are easy to miss when changing CampusCast Web App. Setup and verification commands live in `README.md` and `CONTRIBUTING.md`.
 
-All contributors (human or AI agents such as Claude Code, Codex, etc.) must follow these guidelines.
-Deviation from these rules is not allowed unless explicitly approved.
+## System role
 
----
+The web app is an administrative client for a distributed digital-signage prototype. It owns presentation and browser-side interaction state. Domain records, authorization decisions, schedule validation, signing, release generation, and device control remain backend responsibilities.
 
-## Technology Stack (Must Be Preserved)
+The UI should remain useful when an individual request fails: query errors need visible states, mutations need actionable feedback, and cached editing state must not be mistaken for server confirmation.
 
-The following technologies are core to the system and **must not be replaced or removed**:
+## Technology choices
 
-| Technology           | Role                                                        |
-| -------------------- | ----------------------------------------------------------- |
-| Next.js (App Router) | Framework, SSR, routing                                     |
-| React                | UI rendering                                                |
-| TypeScript           | Type safety                                                 |
-| Tailwind CSS v4      | Styling (CSS-first config)                                  |
-| shadcn/ui            | Base UI component library                                   |
-| Animate UI           | Animated interactive components (sidebar, tooltips, sheets) |
-| TanStack Query       | Server state / data fetching                                |
-| Zustand              | Client state management                                     |
-| Zod                  | Schema validation                                           |
-| pnpm                 | Package manager                                             |
+| Technology | Role | Trade-off |
+| --- | --- | --- |
+| Next.js App Router | Routing, SSR, request rewrites, standalone build | Server and client module boundaries must remain explicit |
+| React and TypeScript | UI and type-checked feature code | External payloads still require runtime validation |
+| Tailwind CSS and shadcn/Radix components | Styling and accessible primitives | Some layout primitives use inline style properties |
+| TanStack Query | Remote data and mutation state | Query keys and invalidation must stay consistent across features |
+| Zustand | Authentication and local UI state | Server-owned records should not be duplicated here |
+| Zod | Runtime validation of selected API contracts | Not every legacy response is covered yet |
+| idb | Durable offline schedule-operation queue | Queued operations are not proof of server acceptance |
 
-Existing integration points that must remain unchanged:
+## Integration boundaries
 
-- API client communicating with `/api/v1/...`
-- WebSocket sync system communicating with `/ws/sync`
-- JWT auth with refresh tokens (SSR-compatible)
-- CRDT-based schedule editor
+### HTTP API
 
----
+Browser API calls use the same-origin prefix configured by `NEXT_PUBLIC_API_PREFIX`, normally `/api/v1`. Service modules under `src/services/` own request construction. Keep components focused on interaction and rendering; do not add feature-specific `fetch` calls when a service module already owns that domain.
 
-## Architecture Constraints
+`src/services/api-client.ts` provides credentials, CSRF forwarding, timeout handling, one refresh-and-retry cycle, and standardized API errors. Changes to this client affect every authenticated feature and require login, expiry, deactivation, and non-JSON error checks.
 
-The following changes are **NOT allowed**:
+### Authentication
 
-- Migrating the project to another framework or stack
-- Removing existing business logic (services, auth, stores, schemas)
-- Breaking existing routes
-- Breaking auth/session/SSR behavior
-- Breaking API client usage
-- Breaking WebSocket sync
-- Removing Zustand stores
-- Removing Zod schemas
-- Recreating the project from scratch
-- Rewriting all pages from zero
+Middleware protects non-public pages by checking the access or refresh cookie. Server handlers perform login, MFA, and logout; the server session loader and API client can refresh an expired access token. Preserve this server-compatible boundary when extending authentication.
 
-These rules exist because the repository is part of a larger distributed system with multiple backend microservices.
+Frontend permission checks improve navigation and interaction, but they are not an authorization boundary. Backend services must still enforce permissions.
 
----
+### Schedule synchronization
 
-## Allowed Changes
+The schedule editor supports locking and CRDT-oriented paths. `src/services/ws-client.ts` owns the `/ws/sync` protocol, while the local queue and schedule feature state live under `src/hooks/` and `src/features/schedules/`.
 
-The following modifications **are allowed**:
+Operation acknowledgement, rejection, compensation, reconnect, and snapshot handling are distinct states. UI feedback must not label a locally queued operation as synchronized before acknowledgement.
 
-- Updating the layout shell (app-shell, sidebar, topbar)
-- Restructuring sidebar/topbar composition
-- Improving UI structure and component composition
-- Aligning UI components with official documentation
-- Fixing CSS/layout issues
-- Adding new pages or features
-- Updating dependencies (with care for breaking changes)
+### Media
 
-UI changes must follow official component documentation (see below).
+Metadata and upload coordination use the content API. Preview URLs use `NEXT_PUBLIC_MINIO_PUBLIC_URL` and are intentionally browser-visible. Treat object keys as untrusted data and keep storage credentials on the server side.
 
----
+## Layout architecture
 
-## UI Libraries Used
+Protected routes use the shared shell:
 
-### 1. shadcn/ui
-
-This is the base UI system used by the project.
-
-Configuration (defined in `components.json`):
-
-- **Style**: Nova (radix-nova)
-- **Base color**: Neutral
-- **Theme**: Indigo (oklch)
-- **Font**: Noto Sans
-- **Radius**: Small (0.45rem)
-- **Icon library**: HugeIcons / Lucide
-
-shadcn/ui components are based on Radix UI primitives and are located in `src/components/ui/`.
-
-**Official documentation**: <https://ui.shadcn.com/docs>
-
-### 2. Animate UI
-
-Animate UI is used for interactive UI components including:
-
-- Sidebar (with collapse, rail, mobile sheet)
-- Animated tooltip
-- Sheet (animated drawer)
-- Highlight effects
-- Sliding number
-
-Animate UI components are located in `src/components/animate-ui/`.
-
-**Official documentation**: <https://animate-ui.com/docs>
-
-**Sidebar documentation**: <https://animate-ui.com/docs/components/radix/sidebar>
-
-All sidebar-related layout behavior must follow the canonical Animate UI patterns.
-
----
-
-## Layout Architecture
-
-The application layout uses the Animate UI sidebar pattern.
-
-### Canonical layout structure
-
-```
-SidebarProvider
-  ├── Sidebar (AppSidebar)
-  └── SidebarInset
-        ├── Topbar (header)
-        └── Page content (div)
+```text
+AuthHydrator
+└── AppShell
+    ├── AppSidebar
+    └── SidebarInset
+        ├── Topbar
+        └── page content
 ```
 
-### Key files
+Relevant files:
 
-| File                                    | Purpose                                                      |
-| --------------------------------------- | ------------------------------------------------------------ |
-| `src/components/layout/app-shell.tsx`   | Root layout shell (SidebarProvider + Sidebar + SidebarInset) |
-| `src/components/layout/app-sidebar.tsx` | Sidebar with navigation                                      |
-| `src/components/layout/topbar.tsx`      | Sticky header inside SidebarInset                            |
-| `src/components/layout/navigation.ts`   | Navigation items and path titles                             |
-| `src/app/(protected)/layout.tsx`        | Protected route layout (AuthHydrator + AppShell)             |
+| File | Responsibility |
+| --- | --- |
+| `src/app/(protected)/layout.tsx` | Authentication hydration and protected shell entry |
+| `src/components/layout/app-shell.tsx` | Shell composition |
+| `src/components/layout/app-sidebar.tsx` | Permission-aware navigation |
+| `src/components/layout/topbar.tsx` | Shared header |
+| `src/components/layout/navigation.ts` | Route metadata |
 
-### Critical layout rules
+`SidebarProvider`, the sidebar, and `SidebarInset` participate in one layout calculation. Keep the top bar inside the inset. Diagnose provider/inset composition and CSS variables before adding fixed offsets or manual sidebar margins.
 
-1. `SidebarProvider` wraps both `Sidebar` and `SidebarInset`
-2. `SidebarInset` is a **required** layout container — it provides `flex-1` and `min-w-0` and participates in the flex/peer mechanics with the sidebar gap spacer
-3. **Never replace `SidebarInset` with a React Fragment** (`<>`) — this breaks layout calculations
-4. Topbar lives **inside** `SidebarInset`, not outside it
-5. No `position: fixed` on topbar — the sidebar container is already fixed
-6. The sidebar reserves space via a gap spacer div with `w-[var(--sidebar-width)]`
+## State ownership
 
----
+- TanStack Query owns backend-derived data and mutation lifecycle state.
+- Zustand owns cross-route client state such as the authenticated session and UI preferences.
+- Component state owns transient forms and interaction state.
+- idb owns unsent schedule operations that must survive reloads.
+- URL parameters own shareable route state such as the selected schedule date or view.
 
-## Project Structure
+Avoid copying one value into multiple stores. When a deliberate cache exists, define which source wins after refresh and failure.
 
-```
-src/
-  app/                    # Next.js App Router pages
-    (protected)/          # Auth-guarded routes (use AppShell layout)
-    login/                # Public login page
-  auth/                   # Auth subsystem (store, guards, session, tokens)
-  components/
-    animate-ui/           # Animate UI components (installed via shadcn CLI)
-    common/               # Shared page components (PageHeader, DataTable, etc.)
-    layout/               # Layout shell (AppShell, AppSidebar, Topbar)
-    ui/                   # shadcn/ui components
-  features/               # Feature modules (UI + logic per domain)
-  hooks/                  # Custom React hooks
-  lib/                    # Utilities, constants, env config
-  services/               # API client and service modules
-  store/                  # Zustand stores
-  types/                  # Zod schemas and TypeScript types
-  ws/                     # WebSocket sync bridge
-middleware.ts             # Auth middleware (root level)
+## Project structure
+
+```text
+src/app/          routes, layouts, and server handlers
+src/auth/         session, cookie, and auth hydration logic
+src/components/   shared shell and UI primitives
+src/features/     domain-focused UI and interaction logic
+src/hooks/        reusable browser behavior
+src/lib/          environment, query keys, i18n, and utilities
+src/services/     HTTP and WebSocket integration clients
+src/store/        cross-route client state
+src/types/        TypeScript models and Zod schemas
+src/ws/           synchronization bridge
+test/             focused Node test-runner checks
 ```
 
----
+Prefer extending the established directory for a concern. A second API client, auth store, or WebSocket abstraction increases ambiguity and should come with an explicit migration plan.
 
-## Docker Workflow
+## Content Security Policy
 
-The project runs behind an nginx reverse proxy in a Docker environment managed by `repo-infra/docker-compose.yml`.
+The CSP is applied by nginx in `repo-infra/docker/nginx/conf.d/default.conf`, not by `next.config.ts`. At the audited baseline it permits `unsafe-inline` and `unsafe-eval` for scripts in production, plus broad HTTP/HTTPS sources for several resource types.
 
-### After modifying frontend code
+That policy is a known security limitation, not a requirement of the application. Some components do rely on inline style attributes, so CSP changes require a rendered browser check. A safe tightening effort should:
 
-```bash
-cd repo-infra
+1. capture violations in report-only mode;
+2. verify Next.js hydration, login/MFA, navigation, media previews, and schedule editing;
+3. separate development allowances from the production policy;
+4. prefer nonces or hashes for required scripts;
+5. document any source that remains broad and why.
 
-# Rebuild and restart web-app
-docker-compose up -d --build web-app
+Do not weaken the policy to fix an unexplained rendering issue. Identify the blocked resource or directive first.
 
-# If nginx configuration changed
-docker-compose restart nginx
-```
+## Verification boundaries
 
-### Full no-cache rebuild (if cached layers are stale)
+Unit-like tests under `test/` cover isolated state transformations and selected source contracts. They do not prove that the distributed backend is available or that browser rendering works. A production build proves compilation and route generation, not authenticated end-to-end behavior.
 
-```bash
-docker-compose build --no-cache web-app
-docker-compose up -d web-app
-```
-
-### Important notes
-
-- The web-app Dockerfile uses multi-stage build: deps → builder → runner (standalone)
-- `.dockerignore` excludes `node_modules`, `.next`, `.git`, `_legacy_backup`
-- The web-app container listens on port 3000 internally
-- External access is through nginx on port 3000 (mapped to nginx port 80)
-
----
-
-## Content Security Policy (Important)
-
-The nginx reverse proxy applies a Content Security Policy header.
-
-Some UI libraries (including Animate UI) rely on **inline `style` attributes** to define CSS variables (e.g., `--sidebar-width: 16rem` on `SidebarProvider`).
-
-If the CSP blocks inline styles, layout features like the sidebar width calculation will break silently — the sidebar gap spacer gets width 0 and page content slides under the sidebar.
-
-**Required CSP directives for the web-app:**
-
-```
-style-src 'self' 'unsafe-inline';
-script-src 'self' 'unsafe-inline' 'unsafe-eval';
-```
-
-The nginx config is located at: `repo-infra/docker/nginx/conf.d/default.conf`
-
----
-
-## Development Commands
-
-```bash
-pnpm dev            # Start dev server on port 3000
-pnpm lint           # Run ESLint (0 errors expected, warnings OK)
-pnpm typecheck      # Run tsc --noEmit
-pnpm build          # Production build (Turbopack)
-```
-
----
-
-## Rules For AI Agents
-
-AI agents working in this repository must:
-
-1. **Read this document** before making architectural changes
-2. **Preserve the defined technology stack** — do not swap libraries
-3. **Follow official documentation** for UI components (shadcn/ui, Animate UI)
-4. **Never remove `SidebarInset`** or replace it with a fragment
-5. **Never add layout hacks** (manual margin-left, padding-left for sidebar offset)
-6. **Run lint, typecheck, and build** after changes (`pnpm lint && pnpm typecheck && pnpm build`)
-7. **Rebuild Docker** after code changes (`docker-compose up -d --build web-app`)
-8. **Avoid destructive refactors** — fix specific issues, don't rewrite entire modules
-9. **Check the CSP** if layout looks broken in Docker but works locally
-
-If a task conflicts with these rules, the task must be rejected or escalated.
+For integration-sensitive changes, record the backend services and browser paths exercised in addition to the repository commands. Keep baseline failures explicit so new regressions are distinguishable.
